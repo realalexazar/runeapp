@@ -2,13 +2,13 @@ import type { Metadata } from 'next'
 import localFont from 'next/font/local'
 import { Inter, Playfair_Display } from 'next/font/google'
 import { cn } from '@/lib/utils'
+import Link from "next/link"
 
 import Providers from '@/components/providers'
 import Header from '@/components/header'
 import Footer from '@/components/footer'
 
 import './globals.css'
-import Link from "next/link";
 
 const geistSans = localFont({
   src: './fonts/GeistVF.woff',
