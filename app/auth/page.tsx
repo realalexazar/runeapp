@@ -22,12 +22,18 @@ export default function Auth() {
   }
 
   async function handleSignIn() {
-    const { user, error } = await supabase.auth.signInWithPassword({
+    const { data, error } = await supabase.auth.signInWithPassword({
       email,
       password,
     });
-    if (error) alert(error.message);
-    else alert("Logged in successfully!");
+
+    if (error) {
+      console.error('Error:', error.message);
+      return;
+    }
+    
+    // Access user data through data.user
+    console.log('Signed in:', data.user);
   }
 
   return (
