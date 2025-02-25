@@ -7,12 +7,18 @@ export default function Auth() {
   const [password, setPassword] = useState("");
 
   async function handleSignUp() {
-    const { user, error } = await supabase.auth.signUp({
+    const { data, error } = await supabase.auth.signUp({
       email,
       password,
     });
-    if (error) alert(error.message);
-    else alert("Check your email for confirmation!");
+    
+    if (error) {
+      console.error('Error:', error.message);
+      return;
+    }
+    
+    // Access user data through data.user
+    console.log('Signed up:', data.user);
   }
 
   async function handleSignIn() {
