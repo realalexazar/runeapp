@@ -27,8 +27,26 @@ const playfair = Playfair_Display({
 })
 
 export const metadata: Metadata = {
-  title: 'Next Shadcn Template',
-  description: 'NextJs template with shadcn/ui'
+  metadataBase: new URL('https://your-domain.com'),
+  title: {
+    default: 'Mortgage App',
+    template: '%s | Mortgage App'
+  },
+  description: 'A modern B2C/B2B mortgage web application.',
+  robots: 'index,follow',
+  icons: { icon: '/favicon.ico' },
+  openGraph: {
+    title: 'Mortgage App',
+    description: 'A modern B2C/B2B mortgage web application.',
+    url: 'https://your-domain.com',
+    siteName: 'Mortgage App',
+    type: 'website'
+  },
+  twitter: {
+    card: 'summary_large_image',
+    title: 'Mortgage App',
+    description: 'A modern B2C/B2B mortgage web application.'
+  }
 }
 
 export default function RootLayout({
@@ -51,7 +69,10 @@ export default function RootLayout({
           <Header />
           <nav className="p-4 bg-gray-800 text-white flex justify-between">
             <Link href="/">Home</Link>
-            <Link href="/auth">Login</Link>
+            <div className="flex gap-4">
+              <Link href="/dashboard">Dashboard</Link>
+              <Link href="/auth">Login</Link>
+            </div>
           </nav>
           <main className='grow'>{children}</main>
           <Footer />

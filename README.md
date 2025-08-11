@@ -1,36 +1,68 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+### Stack
+- **Framework**: Next.js 14 (App Router, TypeScript)
+- **UI**: Tailwind CSS, shadcn/ui, Radix
+- **Auth/DB**: Supabase (`@supabase/ssr`)
+- **Tooling**: ESLint, Prettier, Vitest, GitHub Actions, Docker
 
-## Getting Started
+### Prerequisites
+- Node 18.18+ (Node 20 recommended)
+- pnpm (Corepack: `corepack enable && corepack prepare pnpm@latest --activate`)
 
-First, run the development server:
+### Setup
+1. Create `.env.local` with:
+   - `NEXT_PUBLIC_SUPABASE_URL="https://<project-id>.supabase.co"`
+   - `NEXT_PUBLIC_SUPABASE_ANON_KEY="<anon-key>"`
 
+2. Install dependencies
+   ```bash
+   pnpm install
+   ```
+
+3. Start dev server
+   ```bash
+   pnpm dev
+   ```
+
+Open `http://localhost:3000`.
+
+### OAuth callback
+Set the Supabase Redirect URL to:
+- `http://localhost:3000/auth/callback` (development)
+- `https://your-domain.com/auth/callback` (production)
+
+### Available scripts
+- `pnpm dev`: start dev server
+- `pnpm build`: production build
+- `pnpm start`: run production server
+- `pnpm typecheck`: TypeScript type-check
+- `pnpm lint`: run ESLint
+- `pnpm lint:fix`: fix lint errors
+- `pnpm format`: format with Prettier
+- `pnpm format:check`: check formatting
+- `pnpm test`: run unit tests (Vitest)
+- `pnpm test:watch`: watch mode
+
+### Structure
+- `app/` App Router routes, layouts, middleware-protected dashboard
+- `lib/supabase/` Supabase clients (browser/server) using cookie-based auth
+- `app/auth/callback/` OAuth code exchange route
+- `lib/env.ts` runtime env validation with Zod
+
+### CI
+GitHub Actions workflow runs typecheck, lint, tests, and build. Set secrets:
+- `NEXT_PUBLIC_SUPABASE_URL`
+- `NEXT_PUBLIC_SUPABASE_ANON_KEY`
+
+### Docker
+Build and run locally:
 ```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+docker build -t mortgage-app .
+docker run -p 3000:3000 \
+  -e NEXT_PUBLIC_SUPABASE_URL="$NEXT_PUBLIC_SUPABASE_URL" \
+  -e NEXT_PUBLIC_SUPABASE_ANON_KEY="$NEXT_PUBLIC_SUPABASE_ANON_KEY" \
+  mortgage-app
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
-
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
-
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
-
-## Learn More
-
-To learn more about Next.js, take a look at the following resources:
-
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
-
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
-
-## Deploy on Vercel
-
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
-
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+### B2C now, B2B later
+- B2C auth is configured with Supabase and middleware-protected routes.
+- For B2B multi-tenant, plan to add an `organization_id` claim to JWT and use RLS policies in Supabase; route structure can add `/(app)/[orgId]/...` without major changes.
