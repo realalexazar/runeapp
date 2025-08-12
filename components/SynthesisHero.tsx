@@ -28,12 +28,12 @@ const CHAOS_WORDS = [
 export default function SynthesisHero() {
   const containerRef = useRef<HTMLDivElement | null>(null)
   const wordsRef = useRef<(HTMLDivElement | null)[]>([])
+  const logoRef = useRef<HTMLDivElement | null>(null)
   const { width, height } = useContainerSize()
   const words = useMemo(() => {
     return CHAOS_WORDS.flatMap(text => [
       { id: text + '_1', text, size: 10 + Math.random() * 14 },
       { id: text + '_2', text, size: 10 + Math.random() * 14 },
-      { id: text + '_3', text, size: 10 + Math.random() * 14 },
     ])
   }, [])
 
@@ -47,14 +47,30 @@ export default function SynthesisHero() {
         if (!el) return
 
         const animateWord = () => {
-          const fromBottomLeft = Math.random() > 0.5
-          const startX = fromBottomLeft ? gsap.utils.random(-0.2 * width, 0.5 * width) : gsap.utils.random(0.5 * width, 1.2 * width)
-          const startY = fromBottomLeft ? gsap.utils.random(0.5 * height, 1.2 * height) : gsap.utils.random(-0.2 * height, 0.5 * height)
+          const safeZone = {
+            x: width / 2 - 250,
+            y: height / 2 - 150,
+            width: 500,
+            height: 300
+          };
 
-          const endX = width / 2 + gsap.utils.random(-80, 80)
-          const endY = height / 2 + gsap.utils.random(-80, 80)
+          let startX, startY;
+          let fromBottomLeft;
+          do {
+            fromBottomLeft = Math.random() > 0.5;
+            startX = fromBottomLeft ? gsap.utils.random(-0.2 * width, 0.6 * width) : gsap.utils.random(0.4 * width, 1.2 * width);
+            startY = fromBottomLeft ? gsap.utils.random(0.4 * height, 1.2 * height) : gsap.utils.random(-0.2 * height, 0.6 * height);
+          } while (
+            startX > safeZone.x && startX < safeZone.x + safeZone.width &&
+            startY > safeZone.y && startY < safeZone.y + safeZone.height
+          );
 
-          gsap.set(el, { x: startX, y: startY, opacity: 1, scale: 1, color: '#EAEAEA', textShadow: '0 0 8px rgba(234,234,234,0.5)', filter: 'blur(0px)' })
+          const endRadius = 250;
+          const angle = Math.random() * Math.PI * 2;
+          const endX = width / 2 + Math.cos(angle) * endRadius;
+          const endY = height / 2 + Math.sin(angle) * endRadius;
+
+          gsap.set(el, { x: startX, y: startY, opacity: 1, scale: 1, color: '#EAEAEA', textShadow: 'none', filter: 'blur(0px)' })
 
           const path = [
             { x: startX, y: startY },
@@ -83,7 +99,6 @@ export default function SynthesisHero() {
           
           tl.to(el, {
             color: '#FFFFFF',
-            textShadow: '0 0 20px rgba(255,255,255,0.95), 0 0 10px rgba(255,255,255,0.85)',
             ease: 'power2.in',
             duration: duration / 2
           }, duration / 2)
@@ -98,6 +113,16 @@ export default function SynthesisHero() {
         
         animateWord()
       })
+
+      if (logoRef.current) {
+        gsap.to(logoRef.current, {
+          textShadow: '0 0 15px rgba(255,255,255,0.4), 0 0 5px rgba(255,255,255,0.2)',
+          duration: 2.5,
+          ease: 'power1.inOut',
+          repeat: -1,
+          yoyo: true
+        })
+      }
     }, containerRef)
 
     return () => {
@@ -119,7 +144,7 @@ export default function SynthesisHero() {
             style={{
               opacity: 0,
               color: '#EAEAEA',
-              textShadow: '0 0 8px rgba(255,215,0,0.25), 0 0 2px rgba(255,215,0,0.15)',
+              fontFamily: 'serif',
               fontSize: w.size,
               fontWeight: 400,
               letterSpacing: '0.02em'
@@ -130,12 +155,13 @@ export default function SynthesisHero() {
         ))}
       </div>
       <div 
+        ref={logoRef}
         className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2"
         style={{
           fontFamily: 'serif',
-          fontSize: '96px',
+          fontSize: '128px',
           color: 'white',
-          textShadow: '0 0 15px rgba(255,255,255,0.5)'
+          textShadow: '0 0 8px rgba(255,255,255,0.2)'
         }}
       >
         Rune
