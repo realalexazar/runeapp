@@ -65,7 +65,7 @@ export default function SynthesisHero() {
             startY > safeZone.y && startY < safeZone.y + safeZone.height
           );
 
-          const endRadius = 250;
+          const endRadius = 100;
           const angle = Math.random() * Math.PI * 2;
           const endX = width / 2 + Math.cos(angle) * endRadius;
           const endY = height / 2 + Math.sin(angle) * endRadius;
@@ -75,8 +75,8 @@ export default function SynthesisHero() {
           const path = [
             { x: startX, y: startY },
             { 
-              x: (startX + endX) / 2 + (fromBottomLeft ? -width * 0.25 : width * 0.25), 
-              y: (startY + endY) / 2 + (fromBottomLeft ? height * 0.25 : -height * 0.25) 
+              x: (startX + endX) / 2 + (fromBottomLeft ? -width * 0.35 : width * 0.35), 
+              y: (startY + endY) / 2 + (fromBottomLeft ? height * 0.35 : -height * 0.35) 
             },
             { x: endX, y: endY }
           ]
