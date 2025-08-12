@@ -2,7 +2,6 @@ import type { Metadata } from 'next'
 import localFont from 'next/font/local'
 import { Inter, Playfair_Display } from 'next/font/google'
 import { cn } from '@/lib/utils'
-import Link from "next/link"
 
 import Providers from '@/components/providers'
 import Header from '@/components/header'
@@ -58,7 +57,7 @@ export default function RootLayout({
     <html lang='en' className='scroll-smooth' suppressHydrationWarning>
       <body
         className={cn(
-          'flex min-h-screen flex-col',
+          'flex min-h-screen flex-col bg-[#0B0B0F]',
           geistSans.variable,
           geistMono.variable,
           inter.variable,
@@ -67,13 +66,6 @@ export default function RootLayout({
       >
         <Providers>
           <Header />
-          <nav className="p-4 bg-gray-800 text-white flex justify-between">
-            <Link href="/">Home</Link>
-            <div className="flex gap-4">
-              <Link href="/dashboard">Dashboard</Link>
-              <Link href="/auth">Login</Link>
-            </div>
-          </nav>
           <main className='grow'>{children}</main>
           <Footer />
         </Providers>

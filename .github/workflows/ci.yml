@@ -21,9 +21,18 @@ jobs:
       - run: pnpm typecheck
       - run: pnpm lint
       - run: pnpm test -- --reporter=dot
+      - name: Export Supabase secrets to env
+        shell: bash
+        run: |
+          echo "NEXT_PUBLIC_SUPABASE_URL=${{ secrets.NEXT_PUBLIC_SUPABASE_URL }}" >> $GITHUB_ENV
+          echo "NEXT_PUBLIC_SUPABASE_ANON_KEY=${{ secrets.NEXT_PUBLIC_SUPABASE_ANON_KEY }}" >> $GITHUB_ENV
+      - name: Fallback defaults if secrets are missing (non-prod forks)
+        shell: bash
+        run: |
+          : "${NEXT_PUBLIC_SUPABASE_URL:=https://example.supabase.co}"
+          : "${NEXT_PUBLIC_SUPABASE_ANON_KEY:=dummy}"
+          echo "NEXT_PUBLIC_SUPABASE_URL=$NEXT_PUBLIC_SUPABASE_URL" >> $GITHUB_ENV
+          echo "NEXT_PUBLIC_SUPABASE_ANON_KEY=$NEXT_PUBLIC_SUPABASE_ANON_KEY" >> $GITHUB_ENV
       - run: pnpm build
-        env:
-          NEXT_PUBLIC_SUPABASE_URL: ${{ secrets.NEXT_PUBLIC_SUPABASE_URL }}
-          NEXT_PUBLIC_SUPABASE_ANON_KEY: ${{ secrets.NEXT_PUBLIC_SUPABASE_ANON_KEY }}
 
 
