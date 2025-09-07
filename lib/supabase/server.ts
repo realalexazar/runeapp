@@ -4,8 +4,8 @@ import { cookies } from "next/headers"
 import { env } from "@/lib/env"
 
 // Creates a server-side Supabase client using Next's cookie store
-export function getSupabaseServerClient() {
-  const cookieStore = cookies()
+export async function getSupabaseServerClient() {
+  const cookieStore = await cookies()
 
   return createServerClient(
     env.NEXT_PUBLIC_SUPABASE_URL,

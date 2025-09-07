@@ -7,7 +7,7 @@ import { MotionPathPlugin } from 'gsap/MotionPathPlugin'
 gsap.registerPlugin(MotionPathPlugin)
 
 type FloatingWord = {
-  id: number
+  id: number | string
   text: string
   size: number
 }
@@ -29,6 +29,7 @@ export default function SynthesisHero() {
   const containerRef = useRef<HTMLDivElement | null>(null)
   const wordsRef = useRef<(HTMLDivElement | null)[]>([])
   const logoRef = useRef<HTMLDivElement | null>(null)
+  const headlineRef = useRef<HTMLDivElement | null>(null)
   const { width, height } = useContainerSize()
   const words = useMemo(() => {
     return CHAOS_WORDS.flatMap(text => [
@@ -69,8 +70,15 @@ export default function SynthesisHero() {
           const angle = Math.random() * Math.PI * 2;
           const endX = width / 2 + Math.cos(angle) * endRadius;
           const endY = height / 2 + Math.sin(angle) * endRadius;
-
-          gsap.set(el, { x: startX, y: startY, opacity: 1, scale: 1, color: '#EAEAEA', textShadow: 'none', filter: 'blur(0px)' })
+          
+          gsap.set(el, { 
+            x: startX, 
+            y: startY, 
+            opacity: 1, 
+            color: '#EAEAEA', 
+            textShadow: 'none', 
+            filter: 'blur(0px)' 
+          })
 
           const path = [
             { x: startX, y: startY },
@@ -82,7 +90,7 @@ export default function SynthesisHero() {
           ]
           
           const tl = gsap.timeline({
-            delay: fromBottomLeft ? gsap.utils.random(0, 5) : gsap.utils.random(0, 5),
+            delay: gsap.utils.random(0, 5),
             onComplete: animateWord
           })
 
@@ -123,6 +131,10 @@ export default function SynthesisHero() {
           yoyo: true
         })
       }
+
+      if (headlineRef.current) {
+        gsap.fromTo(headlineRef.current, { opacity: 0 }, { opacity: 1, duration: 1.5, delay: 1 });
+      }
     }, containerRef)
 
     return () => {
@@ -142,12 +154,11 @@ export default function SynthesisHero() {
             }}
             className="absolute select-none will-change-transform"
             style={{
-              opacity: 0,
-              color: '#EAEAEA',
-              fontFamily: 'serif',
+              fontFamily: 'var(--font-sans)',
               fontSize: w.size,
               fontWeight: 400,
-              letterSpacing: '0.02em'
+              letterSpacing: '0.02em',
+              position: 'absolute'
             }}
           >
             {w.text}
@@ -158,7 +169,7 @@ export default function SynthesisHero() {
         ref={logoRef}
         className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2"
         style={{
-          fontFamily: 'serif',
+          fontFamily: "var(--font-serif)",
           fontSize: '128px',
           color: 'white',
           textShadow: '0 0 8px rgba(255,255,255,0.2)'
@@ -166,20 +177,31 @@ export default function SynthesisHero() {
       >
         Rune
       </div>
+      <div
+        ref={headlineRef}
+        className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 mt-16"
+        style={{
+          fontFamily: 'var(--font-sans)',
+          fontSize: '20px',
+          color: 'rgba(234, 234, 234, 0.8)',
+          letterSpacing: '0.05em',
+          textAlign: 'center'
+        }}
+      >
+        Your Personalized Intelligence Briefing
+      </div>
     </section>
   )
 }
 
 function useContainerSize() {
   const [size, setSize] = useState({ width: 0, height: 0 })
-
   useEffect(() => {
     const update = () => setSize({ width: window.innerWidth, height: window.innerHeight })
     update()
     window.addEventListener('resize', update)
     return () => window.removeEventListener('resize', update)
   }, [])
-
   return size
 }
 
