@@ -47,7 +47,7 @@
     --accent: 12 6.5% 15.1%;
     --accent-foreground: 0 0% 98%;
     --destructive: 0 62.8% 30.6%;
-    --destructive-foreground: 0 85.7% 97.3%;
+    --destructive-foreground: 210 40% 98%;
     --border: 240 3.7% 15.9%;
     --input: 240 3.7% 15.9%;
     --ring: 142.4 71.8% 29.2%;
@@ -57,6 +57,26 @@
     --chart-4: 280 65% 60%;
     --chart-5: 340 75% 55%;
   }
+}
+
+@keyframes subtle-swirl {
+  0% {
+    background-position: 0% 50%;
+  }
+  50% {
+    background-position: 100% 50%;
+  }
+  100% {
+    background-position: 0% 50%;
+  }
+}
+
+.swirling-background {
+  background: radial-gradient(circle at 20% 20%, hsl(270, 50%, 15%, 0.2), transparent 40%),
+              radial-gradient(circle at 80% 70%, hsl(250, 60%, 20%, 0.2), transparent 40%),
+              #0B0B0F;
+  background-size: 200% 200%;
+  animation: subtle-swirl 30s ease-in-out infinite;
 }
 
 @layer base {

@@ -3,6 +3,8 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { gsap } from 'gsap'
 import { MotionPathPlugin } from 'gsap/MotionPathPlugin'
+import AuthDialog from '@/components/AuthDialog'
+import { Button } from '@/components/ui/button'
 
 gsap.registerPlugin(MotionPathPlugin)
 
@@ -40,8 +42,6 @@ export default function SynthesisHero() {
 
   useEffect(() => {
     if (!containerRef.current || !width || !height) return
-
-    document.body.style.overflow = 'hidden'
 
     const ctx = gsap.context(() => {
       wordsRef.current.forEach((el, i) => {
@@ -139,9 +139,11 @@ export default function SynthesisHero() {
 
     return () => {
       ctx.revert()
-      document.body.style.overflow = ''
     }
   }, [width, height, words])
+
+  const [signupOpen, setSignupOpen] = useState(false)
+  const [loginOpen, setLoginOpen] = useState(false)
 
   return (
     <section ref={containerRef} className="relative h-[100svh] w-full overflow-hidden" style={{ backgroundColor: '#0B1A33' }}>
@@ -190,6 +192,15 @@ export default function SynthesisHero() {
       >
         Your Personalized Intelligence Briefing
       </div>
+      <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 mt-28 flex items-center gap-4">
+        <Button size="lg" onClick={() => setSignupOpen(true)}>Sign Up</Button>
+        <Button size="lg" variant="outline" className="bg-white/5 border-white/20 text-white hover:bg-white/10" onClick={() => setLoginOpen(true)}>
+          Login
+        </Button>
+      </div>
+      <AuthDialog open={signupOpen} onOpenChange={setSignupOpen} initialMode="signup" />
+      <AuthDialog open={loginOpen} onOpenChange={setLoginOpen} initialMode="login" />
+      <div className="pointer-events-none absolute inset-x-0 bottom-0 h-24 bg-gradient-to-b from-transparent to-[#0B0B0F]" />
     </section>
   )
 }
