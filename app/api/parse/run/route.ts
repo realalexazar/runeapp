@@ -805,7 +805,7 @@ export async function POST(req: Request) {
       template_hash: templateHash,
       confidence,
       classifier_source: classifierSource,
-      classifier_version: 'v5b',
+      classifier_version: 'v5b1',
       reasons,
       from_email: fromEmail || null,
       from_domain: fromDomain || null,

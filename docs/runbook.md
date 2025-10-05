@@ -12,7 +12,7 @@ This guide covers how to run backfill/parse/re‑enrich and export training data
 - Dashboard: Parse Until Done (limit default 300).
 - API: POST /api/parse/run  body { "limit": 300 }
 - Writes messages_clean: features_json, signals, is_newsletter, confidence, classifier_source, classifier_version, reasons (applied_rules ordered, top_reasons, optional why_not_top, features).
-- Current version: v5b (strict cold‑start, SimHash, monthly cadence, LO/HI gating, sender_key normalization).
+- Current version: v5b1 (strict cold‑start, SimHash, monthly cadence, LO/HI gating, sender_key normalization).
 
 3) Re‑Enrich (refresh old rows to current rules)
 - API: POST /api/parse/re-enrich  body { "limit": 200 }
@@ -29,7 +29,7 @@ This guide covers how to run backfill/parse/re‑enrich and export training data
   }
 })();
 ```
-- Selection and remaining share the same predicate (v5b + missing metadata).
+- Selection and remaining share the same predicate (v5b1 + missing metadata).
 
 4) Progress + Quick Checks
 - GET /api/parse/progress returns raw/clean/newsletters/remaining.
@@ -55,5 +55,5 @@ Notes
 - Studio snippet errors: open a new query tab instead of a stale snippet link.
 - Tag ordering: re‑enrich once; applied_rules are deterministic.
 
-Last updated: v5b
+Last updated: v5b1
 
