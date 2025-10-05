@@ -550,6 +550,26 @@ export async function POST(req: Request) {
       existingProfile = existingResp.data || null
     }
 
+    // Compute per-sender host entropy P40 from recent messages (ephemeral override)
+    let hostEntropyP40: number | null = null
+    if (senderKey) {
+      const recent = await supabaseServiceRole
+        .from("messages_clean")
+        .select("features_json, received_at")
+        .eq("user_id", user.id)
+        .eq("sender_key", senderKey)
+        .order("received_at", { ascending: false })
+        .limit(50)
+      const vals = (recent.data || [])
+        .map(r => (r as any).features_json?.host_entropy)
+        .filter((x: any) => typeof x === 'number' && !Number.isNaN(x)) as number[]
+      if (vals.length >= 5) {
+        const sorted = vals.slice().sort((a, b) => a - b)
+        const idx = Math.max(0, Math.min(sorted.length - 1, Math.floor(0.40 * (sorted.length - 1))))
+        hostEntropyP40 = Number(sorted[idx].toFixed(3))
+      }
+    }
+
     // Compact headers_json subset
     // Prefer raw header line for content-type to avoid "[object Object]"
     const headerLines = (parsedMail as any).headerLines as Array<{ key: string; line: string }> | undefined
@@ -708,7 +728,8 @@ export async function POST(req: Request) {
               fromDomain,
               senderKey,
               senderCounts30d: counts30,
-              minSpacingDays: (existingProfile?.min_spacing_days as number | null) ?? null
+              minSpacingDays: (existingProfile?.min_spacing_days as number | null) ?? null,
+              hostEntropyMinOverride: hostEntropyP40
             })
             let applied = (r as any).reasons?.applied_rules ?? []
             const centroids: string[] = Array.isArray(existingProfile?.template_centroids) ? (existingProfile!.template_centroids as unknown as string[]) : []
@@ -744,7 +765,8 @@ export async function POST(req: Request) {
             fromDomain,
             senderKey,
             senderCounts30d: existingProfile?.counts_30d || 0,
-            minSpacingDays: (existingProfile?.min_spacing_days as number | null) ?? null
+            minSpacingDays: (existingProfile?.min_spacing_days as number | null) ?? null,
+            hostEntropyMinOverride: hostEntropyP40
           })
           isNewsletter = r.isNewsletter
           confidence = r.confidence
