@@ -132,8 +132,8 @@ export async function POST(req: Request) {
     .from("messages_clean")
     .select("id, raw_message_id, storage_path, html_url, text_url, headers_json, from_domain, sender_key, subject")
     .eq("user_id", user.id)
-    // Re-enrich if version is old OR critical metadata missing (Beacon v5b1)
-    .or("classifier_version.is.null,classifier_version.neq.v5b1,sender_key.is.null,subject.is.null")
+    // Re-enrich if version is old OR critical metadata missing (Beacon v5b2)
+    .or("classifier_version.is.null,classifier_version.neq.v5b2,sender_key.is.null,subject.is.null")
     .limit(limit)
 
   if (selErr) return NextResponse.json({ ok: false, error: selErr.message })
@@ -425,7 +425,7 @@ export async function POST(req: Request) {
           from_domain: fromDomain,
           subject: subject,
           received_at: receivedAt,
-          classifier_version: 'v5b1',
+          classifier_version: 'v5b2',
           reasons
         })
         .eq('id', row.id)
@@ -437,12 +437,12 @@ export async function POST(req: Request) {
     }
   }
 
-  // Remaining count uses the same predicate as selection to avoid confusion (Beacon v5b1)
+  // Remaining count uses the same predicate as selection to avoid confusion (Beacon v5b2)
   const { count: remaining } = await supabaseServiceRole
     .from('messages_clean')
     .select('id', { head: true, count: 'exact' })
     .eq('user_id', user.id)
-    .or('classifier_version.is.null,classifier_version.neq.v5b1,sender_key.is.null,subject.is.null')
+    .or('classifier_version.is.null,classifier_version.neq.v5b2,sender_key.is.null,subject.is.null')
 
   return NextResponse.json({ ok: true, selected: candidates.length, updated, remaining: remaining ?? 0, errors })
 }
