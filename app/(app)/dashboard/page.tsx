@@ -1,6 +1,7 @@
 import { getSupabaseServerClient } from "@/lib/supabase/server"
 import { supabaseServiceRole } from "@/lib/supabase/service"
 import ConnectGmailCard from "@/components/ConnectGmailCard"
+import BackfillParseControls from "@/components/BackfillParseControls"
 
 export default async function DashboardPage() {
   const supabase = await getSupabaseServerClient()
@@ -28,6 +29,7 @@ export default async function DashboardPage() {
         </div>
         <div className="grid grid-cols-1 gap-6 md:grid-cols-2 lg:grid-cols-3">
           <ConnectGmailCard isConnected={isConnected} />
+          <BackfillParseControls />
         </div>
       </div>
     </section>

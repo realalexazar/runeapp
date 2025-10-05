@@ -1,5 +1,5 @@
 ### Stack
-- **Framework**: Next.js 14 (App Router, TypeScript)
+- **Framework**: Next.js (App Router, TypeScript)
 - **UI**: Tailwind CSS, shadcn/ui, Radix
 - **Auth/DB**: Supabase (`@supabase/ssr`)
 - **Tooling**: ESLint, Prettier, Vitest, GitHub Actions, Docker
@@ -26,9 +26,9 @@
 Open `http://localhost:3000`.
 
 ### OAuth callback
-Set the Supabase Redirect URL to:
-- `http://localhost:3000/auth/callback` (development)
-- `https://your-domain.com/auth/callback` (production)
+Google OAuth client redirect URIs:
+- `http://localhost:3000/api/connect/gmail/callback` (development)
+- `https://<your-vercel-domain>/api/connect/gmail/callback` (preview/prod)
 
 ### Available scripts
 - `pnpm dev`: start dev server
@@ -45,13 +45,35 @@ Set the Supabase Redirect URL to:
 ### Structure
 - `app/` App Router routes, layouts, middleware-protected dashboard
 - `lib/supabase/` Supabase clients (browser/server) using cookie-based auth
-- `app/auth/callback/` OAuth code exchange route
+- `app/api/connect/gmail/start` and `.../callback` OAuth flow for Gmail (readonly)
+- `app/api/backfill/start` Backfill Gmail (Primary + Updates, last 30 days) with pagination
+- `app/api/parse/run` Parse unprocessed emails, sanitize HTML/text, detect newsletters
+- `app/api/backfill/progress` Lightweight progress endpoint (counts `messages_raw`)
+- `components/BackfillParseControls` Dashboard control for Backfill/Parse with inline results
 - `lib/env.ts` runtime env validation with Zod
 
 ### CI
 GitHub Actions workflow runs typecheck, lint, tests, and build. Set secrets:
 - `NEXT_PUBLIC_SUPABASE_URL`
 - `NEXT_PUBLIC_SUPABASE_ANON_KEY`
+
+### Backfill & Parse (local testing)
+
+1) Connect Gmail from the dashboard (readonly scope).
+2) Click "Start Backfill". This paginates Gmail and ingests raw emails:
+   - Scope: Primary + Updates, last 30 days
+   - Idempotent upserts to `messages_raw`
+   - Raw MIME saved under `emails-raw/<userId>/<gmailId>.eml`
+   - Live progress shown via `/api/backfill/progress`
+3) Click "Parse Once" or "Parse Until Done" with a limit (default 100, 1–500 accepted). This:
+   - Parses unprocessed rows from `messages_raw`
+   - Sanitizes HTML, generates text, detects newsletter signals
+   - Saves cleaned files under `emails-clean/<userId>/<rawId>.(html|txt)`
+   - Upserts into `messages_clean` with `is_newsletter` and `signals`
+
+Notes:
+- Re-running Backfill/Parse is safe (idempotent).
+- Parse returns `{ ok, parsed, errors }`. When `parsed` is 0 repeatedly, the backlog is drained.
 
 ### Docker
 Build and run locally:
