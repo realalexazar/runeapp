@@ -232,6 +232,8 @@ const APPLIED_RULE_ORDER = [
   "subject_cue",
   "simhash_strong",
   "simhash_weak",
+  "cadence_daily",
+  "cadence_weekly",
   "cadence_monthly",
   "sender_key_normalized",
   "model",
@@ -782,6 +784,17 @@ export async function POST(req: Request) {
       const hasCue = /(newsletter|digest|round\s?up|round-up)/i.test(subj) || /[\p{Emoji}\p{Extended_Pictographic}]/u.test(subj)
       if (hasCue && !appliedRules.includes("subject_cue")) appliedRules.push("subject_cue")
     }
+      // Cadence tags based on min_spacing_days if available
+      const msd = (existingProfile?.min_spacing_days as number | null) ?? null
+      if (msd != null) {
+        if (msd <= 2 && !appliedRules.includes("cadence_daily")) {
+          (reasons.top_reasons as any[]).unshift('daily cadence')
+          appliedRules.push("cadence_daily")
+        } else if (msd <= 9 && !appliedRules.includes("cadence_weekly")) {
+          (reasons.top_reasons as any[]).unshift('weekly/biweekly cadence')
+          appliedRules.push("cadence_weekly")
+        }
+      }
       reasons = { ...reasons, applied_rules: orderAppliedRules(appliedRules) }
     }
 

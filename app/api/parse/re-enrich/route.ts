@@ -371,6 +371,16 @@ export async function POST(req: Request) {
           if (features.has_view_in_browser || signals.viewInBrowser) {
             if (!appliedRules.includes('view_in_browser')) appliedRules.push('view_in_browser')
           }
+          // Cadence tags based on spacing if available
+          if (spacing != null) {
+            if (spacing <= 2 && !appliedRules.includes('cadence_daily')) {
+              (reasons.top_reasons as any[]).unshift('daily cadence')
+              appliedRules.push('cadence_daily')
+            } else if (spacing <= 9 && !appliedRules.includes('cadence_weekly')) {
+              (reasons.top_reasons as any[]).unshift('weekly/biweekly cadence')
+              appliedRules.push('cadence_weekly')
+            }
+          }
           // Subject cue tag for explainability
           if ((subjectStr || '').length > 0) {
             const subj = subjectStr || ''
