@@ -229,6 +229,7 @@ const APPLIED_RULE_ORDER = [
   "esp_fingerprint",
   "tracking_pixel",
   "view_in_browser",
+  "subject_cue",
   "simhash_strong",
   "simhash_weak",
   "cadence_monthly",
@@ -316,6 +317,10 @@ function applyBeaconV4(inputs: BeaconInputs) {
   if (features.esp_fingerprint) { positive += 1; reasons.push("ESP fingerprint") }
   if (features.link_count > 8) { positive += 1; reasons.push("many links") }
   if (features.tracking_pixel_present) { positive += 1; reasons.push("tracking pixel") }
+  // 2b) Subject/from cues (lightweight)
+  const subj = subject || ""
+  const subjectCue = /(newsletter|digest|round\s?up|round-up)/i.test(subj) || /[\p{Emoji}\p{Extended_Pictographic}]/u.test(subj)
+  if (subjectCue) { positive += 0.5; reasons.push("subject cue") }
 
   // 3) Transactional guards (lightweight)
   const transactional = /\b(order|receipt|invoice|otp|verification code|password reset|tracking number|ticket)\b/i
@@ -771,6 +776,12 @@ export async function POST(req: Request) {
       if (features.has_view_in_browser || signals.viewInBrowser) {
         if (!appliedRules.includes("view_in_browser")) appliedRules.push("view_in_browser")
       }
+    // Subject cue tag for explainability
+    if ((subject || "").length > 0) {
+      const subj = subject || ""
+      const hasCue = /(newsletter|digest|round\s?up|round-up)/i.test(subj) || /[\p{Emoji}\p{Extended_Pictographic}]/u.test(subj)
+      if (hasCue && !appliedRules.includes("subject_cue")) appliedRules.push("subject_cue")
+    }
       reasons = { ...reasons, applied_rules: orderAppliedRules(appliedRules) }
     }
 

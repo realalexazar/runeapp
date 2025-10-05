@@ -371,6 +371,12 @@ export async function POST(req: Request) {
           if (features.has_view_in_browser || signals.viewInBrowser) {
             if (!appliedRules.includes('view_in_browser')) appliedRules.push('view_in_browser')
           }
+          // Subject cue tag for explainability
+          if ((subjectStr || '').length > 0) {
+            const subj = subjectStr || ''
+            const hasCue = /(newsletter|digest|round\s?up|round-up)/i.test(subj) || /[\p{Emoji}\p{Extended_Pictographic}]/u.test(subj)
+            if (hasCue && !appliedRules.includes('subject_cue')) appliedRules.push('subject_cue')
+          }
           const APPLIED_RULE_ORDER = [
             'user_override','transactional_suppression','headline_alert_suppression','cold_start_gate','strong_headers','footer_i18n','esp_fingerprint','tracking_pixel','view_in_browser','simhash_strong','simhash_weak','cadence_monthly','sender_key_normalized','model','llm'
           ]
