@@ -697,9 +697,9 @@ export async function POST(req: Request) {
             applied_rules: ["headline_alert_suppression"]
           }
         } else {
-        // Cold-start strict gate (Beacon v5.6) wraps the existing fallback
-        const counts30 = existingProfile?.counts_30d || 0
-        const isColdStart = counts30 === 1
+        // Cold-start strict gate: fire on FIRST message (no profile or 0 in last 30d)
+        const counts30 = (existingProfile?.counts_30d ?? 0)
+        const isColdStart = (existingProfile == null) || counts30 === 0
         if (isColdStart) {
           const textToLink = features.body_char_len / Math.max(1, features.link_count)
           const hasFooterOrEsp = !!(signals.listUnsubscribe || signals.unsubscribeLink || signals.managePrefs || signals.postalAddress || features.esp_fingerprint || features.has_view_in_browser || features.i18n_unsubscribe_present)
