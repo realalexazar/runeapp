@@ -658,8 +658,8 @@ export async function POST(req: Request) {
       const autoSubmitted = /auto-?submitted/i.test(String(headers["auto-submitted"] || headers["Auto-Submitted"] || ""))
       const contentType = String(headers["content-type"] || headers["Content-Type"] || "")
       const dsn = /delivery-status|multipart\/(report)/i.test(contentType) || /mailer-daemon|postmaster/i.test(String(headers["from"] || ""))
-      const txnSubject = /^(your\s+)?(order|order\s+#|order\s+confirmation|receipt|invoice|payment|delivered:|delivered\s*:|shipped:|shipped\s*:|tracking|tracking\s+number)/i.test(subject || "")
-        || /(otp|2fa|verification code|password reset|login alert)/i.test(subject || "")
+      const txnSubject = /^(your\s+)?(order|order\s+#|order\s+confirmation|receipt|invoice|payment|delivered:|delivered\s*:|shipped:|shipped\s*:|tracking|tracking\s+number|reservation|booking|itinerary|pickup|drop[- ]?off|confirm(?:ed|ation)?)/i.test(subject || "")
+        || /(otp|2fa|verification code|password reset|login alert|account (?:alert|notice))/i.test(subject || "")
       if (autoSubmitted || dsn || txnSubject) {
         isNewsletter = false
         confidence = 0.98
@@ -840,7 +840,7 @@ export async function POST(req: Request) {
       template_hash: templateHash,
       confidence,
       classifier_source: classifierSource,
-      classifier_version: 'v5b2',
+      classifier_version: 'v5c',
       reasons,
       from_email: fromEmail || null,
       from_domain: fromDomain || null,

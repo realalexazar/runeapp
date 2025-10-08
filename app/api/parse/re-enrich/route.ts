@@ -132,8 +132,8 @@ export async function POST(req: Request) {
     .from("messages_clean")
     .select("id, raw_message_id, storage_path, html_url, text_url, headers_json, from_domain, sender_key, subject")
     .eq("user_id", user.id)
-    // Re-enrich if version is old OR critical metadata missing (Beacon v5b2)
-    .or("classifier_version.is.null,classifier_version.neq.v5b2,sender_key.is.null,subject.is.null")
+    // Re-enrich if version is old OR critical metadata missing (Beacon v5c)
+    .or("classifier_version.is.null,classifier_version.neq.v5c,sender_key.is.null,subject.is.null")
     .limit(limit)
 
   if (selErr) return NextResponse.json({ ok: false, error: selErr.message })
@@ -278,10 +278,10 @@ export async function POST(req: Request) {
         const autoSubmitted = /auto-?submitted/i.test(String(headers["auto-submitted"] || headers["Auto-Submitted"] || ""))
         const contentType = String(headers["content-type"] || headers["Content-Type"] || "")
         const dsn = /delivery-status|multipart\/(report)/i.test(contentType) || /mailer-daemon|postmaster/i.test(String(headers["from"] || ""))
-        const txnTerms = /\b(receipt|invoice|order|shipment|shipping|tracking number|otp|2fa|verification code|password reset|login alert)\b/i
+        const txnTerms = /\b(receipt|invoice|order|shipment|shipping|tracking number|reservation|booking|itinerary|pickup|drop[- ]?off|confirm(?:ed|ation)?|otp|2fa|verification code|password reset|login alert)\b/i
           .test(subjectStr || text || "")
-        const txnSubject = /^(your\s+)?(order|order\s+#|order\s+confirmation|receipt|invoice|payment|delivered:|delivered\s*:|shipped:|shipped\s*:|tracking|tracking\s+number)/i.test(subjectStr || "")
-          || /(otp|2fa|verification code|password reset|login alert)/i.test(subjectStr || "")
+        const txnSubject = /^(your\s+)?(order|order\s+#|order\s+confirmation|receipt|invoice|payment|delivered:|delivered\s*:|shipped:|shipped\s*:|tracking|tracking\s+number|reservation|booking|itinerary|pickup|drop[- ]?off|confirm(?:ed|ation)?)/i.test(subjectStr || "")
+          || /(otp|2fa|verification code|password reset|login alert|account (?:alert|notice))/i.test(subjectStr || "")
         if (autoSubmitted || dsn || txnSubject) {
           isNewsletter = false
           confidence = 0.98
@@ -425,7 +425,7 @@ export async function POST(req: Request) {
           from_domain: fromDomain,
           subject: subject,
           received_at: receivedAt,
-          classifier_version: 'v5b2',
+          classifier_version: 'v5c',
           reasons
         })
         .eq('id', row.id)
@@ -437,12 +437,12 @@ export async function POST(req: Request) {
     }
   }
 
-  // Remaining count uses the same predicate as selection to avoid confusion (Beacon v5b2)
+  // Remaining count uses the same predicate as selection to avoid confusion (Beacon v5c)
   const { count: remaining } = await supabaseServiceRole
     .from('messages_clean')
     .select('id', { head: true, count: 'exact' })
     .eq('user_id', user.id)
-    .or('classifier_version.is.null,classifier_version.neq.v5b2,sender_key.is.null,subject.is.null')
+    .or('classifier_version.is.null,classifier_version.neq.v5c,sender_key.is.null,subject.is.null')
 
   return NextResponse.json({ ok: true, selected: candidates.length, updated, remaining: remaining ?? 0, errors })
 }
