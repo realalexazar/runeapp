@@ -384,7 +384,7 @@ export async function POST(req: Request) {
           // Subject cue tag for explainability
           if ((subjectStr || '').length > 0) {
             const subj = subjectStr || ''
-            const hasCue = /(newsletter|digest|round\s?up|round-up)/i.test(subj) || /[\p{Emoji}\p{Extended_Pictographic}]/u.test(subj)
+            const hasCue = /(newsletter|digest|round\s?up|round-up)/i.test(subj)
             if (hasCue && !appliedRules.includes('subject_cue')) appliedRules.push('subject_cue')
           }
           const APPLIED_RULE_ORDER = [

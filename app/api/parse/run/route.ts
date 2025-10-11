@@ -321,7 +321,7 @@ function applyBeaconV4(inputs: BeaconInputs) {
   if (features.tracking_pixel_present) { positive += 1; reasons.push("tracking pixel") }
   // 2b) Subject/from cues (lightweight)
   const subj = subject || ""
-  const subjectCue = /(newsletter|digest|round\s?up|round-up)/i.test(subj) || /[\p{Emoji}\p{Extended_Pictographic}]/u.test(subj)
+  const subjectCue = /(newsletter|digest|round\s?up|round-up)/i.test(subj)
   if (subjectCue) { positive += 0.5; reasons.push("subject cue") }
 
   // 3) Transactional guards (lightweight)
@@ -803,7 +803,7 @@ export async function POST(req: Request) {
     // Subject cue tag for explainability
     if ((subject || "").length > 0) {
       const subj = subject || ""
-      const hasCue = /(newsletter|digest|round\s?up|round-up)/i.test(subj) || /[\p{Emoji}\p{Extended_Pictographic}]/u.test(subj)
+      const hasCue = /(newsletter|digest|round\s?up|round-up)/i.test(subj)
       if (hasCue && !appliedRules.includes("subject_cue")) appliedRules.push("subject_cue")
     }
       // Cadence tags based on min_spacing_days if available
