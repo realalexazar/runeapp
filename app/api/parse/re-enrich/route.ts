@@ -89,34 +89,51 @@ function applyBeaconV4Lite(inputs: any) {
   const reasons: string[] = []
   let positive = 0
   let negative = 0
+  const components: Record<string, number> = {}
   if (signals.listId) { positive += 3; reasons.push("list-id header present") }
   if (signals.listUnsubscribe) { positive += 2; reasons.push("list-unsubscribe present") }
   if (signals.listUnsubscribeOneClick) { positive += 1; reasons.push("one-click unsubscribe") }
-  if (signals.viewInBrowser) { positive += 1; reasons.push("view in browser") }
-  if (signals.postalAddress) { positive += 1; reasons.push("postal address footer") }
-  if (features.i18n_unsubscribe_present) { positive += 1; reasons.push("i18n unsubscribe") }
-  if (features.esp_fingerprint) { positive += 1; reasons.push("ESP fingerprint") }
-  if (features.link_count > 8) { positive += 1; reasons.push("many links") }
-  if (features.tracking_pixel_present) { positive += 1; reasons.push("tracking pixel") }
+  if (signals.viewInBrowser) { positive += 1; reasons.push("view in browser"); components.view_in_browser = (components.view_in_browser ?? 0) + 1 }
+  if (signals.postalAddress) { positive += 1; reasons.push("postal address footer"); components.postal_address = (components.postal_address ?? 0) + 1 }
+  if (features.i18n_unsubscribe_present) { positive += 1; reasons.push("i18n unsubscribe"); components.i18n_unsubscribe = (components.i18n_unsubscribe ?? 0) + 1 }
+  if (features.esp_fingerprint) { positive += 1; reasons.push("ESP fingerprint"); components.esp_fingerprint = (components.esp_fingerprint ?? 0) + 1 }
+  if (features.link_count > 8) { positive += 1; reasons.push("many links"); components.many_links = (components.many_links ?? 0) + 1 }
+  if (features.tracking_pixel_present) { positive += 1; reasons.push("tracking pixel"); components.tracking_pixel = (components.tracking_pixel ?? 0) + 1 }
+  // Subject cues: align with parse
+  const subjectCue = /(newsletter|digest|round\s?up|round-up)/i.test(subject || "")
+  if (subjectCue) { positive += 0.5; reasons.push("subject cue"); components.subject_cue = (components.subject_cue ?? 0) + 0.5 }
   const transactional = /\b(order|receipt|invoice|otp|verification code|password reset|tracking number|ticket)\b/i.test(subject || "")
   if (transactional && !signals.listId && !signals.listUnsubscribe) { negative += 3; reasons.push("transactional terms without list headers") }
   const hostEntropyOk = features.host_entropy >= HOST_ENTROPY_MIN_DEFAULT
-  if (hostEntropyOk) { positive += 1; reasons.push("high host entropy") } else { negative += 1 }
-  if (minSpacingDays != null) { if (minSpacingDays <= 2) { positive += 1; reasons.push("near-daily cadence") } else if (minSpacingDays <= 9) { positive += 1; reasons.push("weekly/biweekly cadence") } }
+  if (hostEntropyOk) { positive += 1; reasons.push("high host entropy"); components.entropy_ok = (components.entropy_ok ?? 0) + 1 } else { negative += 1 }
+  if (minSpacingDays != null) { if (minSpacingDays <= 2) { positive += 1; reasons.push("near-daily cadence"); components.cadence = (components.cadence ?? 0) + 1 } else if (minSpacingDays <= 9) { positive += 1; reasons.push("weekly/biweekly cadence"); components.cadence = (components.cadence ?? 0) + 1 } }
   const coldStart = (senderCounts30d || 0) <= 1
   const textToLink = features.body_char_len / Math.max(1, features.link_count)
   if (coldStart) {
     const hasFooterOrEsp = !!(signals.listUnsubscribe || signals.unsubscribeLink || signals.managePrefs || signals.postalAddress || features.esp_fingerprint)
     const hasVolume = (features.body_char_len >= BODY_LEN_COLDSTART_MIN) || (textToLink >= TEXT_TO_LINK_RATIO_COLDSTART_MIN)
     if (!(hasFooterOrEsp && hasVolume && hostEntropyOk)) {
-      return { isNewsletter: false, confidence: 0.12, classifierSource: "rule", reasons: { top_reasons: [], why_not_top: "cold-start: insufficient footer/volume/entropy", features: { host_entropy: features.host_entropy, text_to_link_ratio: Number(textToLink.toFixed(3)) } } }
+      return { isNewsletter: false, confidence: 0.12, classifierSource: "rule", reasons: { top_reasons: [], why_not_top: "cold-start: insufficient footer/volume/entropy", features: { host_entropy: features.host_entropy, text_to_link_ratio: Number(textToLink.toFixed(3)) }, applied_rules: ['cold_start_gate'], meta: { mapping: 'gate:cold_start' } } }
     }
-    reasons.push("cold-start satisfied"); positive += 1
+    reasons.push("cold-start satisfied"); components.cold_start_satisfied = (components.cold_start_satisfied ?? 0) + 1
+    // ensure tag is present for downstream audit/reconstruction
+    if (Array.isArray((reasons as any).applied_rules)) {
+      const ar = (reasons as any).applied_rules as string[]
+      if (!ar.includes('cold_start_satisfied')) ar.push('cold_start_satisfied')
+    } else {
+      (reasons as any).applied_rules = ['cold_start_satisfied']
+    }
+    positive += 1
   }
-  const score = Math.max(0, positive - Math.max(0, negative - 1))
+  const negPenalty = Math.max(0, negative - 1)
+  if (negPenalty > 0) components.negative_penalty = (components.negative_penalty ?? 0) - negPenalty
+  const score = Math.max(0, positive - negPenalty)
   const isNewsletter = score >= 3 || signals.listId === true
-  const confidence = Number(Math.min(0.98, 0.2 + score * 0.12).toFixed(2))
-  return { isNewsletter, confidence, classifierSource: "rule", reasons: { top_reasons: reasons.slice(0,2), why_not_top: isNewsletter ? undefined : (hostEntropyOk ? "signals insufficient" : "low host entropy"), features: { host_entropy: features.host_entropy, text_to_link_ratio: Number(textToLink.toFixed(3)), link_count: features.link_count, tracking_pixel_present: features.tracking_pixel_present } } }
+  // Logistic mapping to match parse
+  const logistic = (x: number) => 1 / (1 + Math.exp(-1.2 * (x - 3)))
+  const confidence = Number(Math.max(0, Math.min(1, logistic(score))).toFixed(2))
+  const meta: any = { mapping: 'logistic_v1', score: String(score), components }
+  return { isNewsletter, confidence, classifierSource: "rule", reasons: { top_reasons: reasons.slice(0,2), why_not_top: isNewsletter ? undefined : (hostEntropyOk ? "signals insufficient" : "low host entropy"), features: { host_entropy: features.host_entropy, text_to_link_ratio: Number(textToLink.toFixed(3)), link_count: features.link_count, tracking_pixel_present: features.tracking_pixel_present }, meta } }
 }
 
 export async function POST(req: Request) {
@@ -132,8 +149,8 @@ export async function POST(req: Request) {
     .from("messages_clean")
     .select("id, raw_message_id, storage_path, html_url, text_url, headers_json, from_domain, sender_key, subject")
     .eq("user_id", user.id)
-    // Re-enrich if version is old OR critical metadata missing (Beacon v5c)
-    .or("classifier_version.is.null,classifier_version.neq.v5c,sender_key.is.null,subject.is.null")
+    // Re-enrich if version is old OR critical metadata missing (Beacon v6)
+    .or("classifier_version.is.null,classifier_version.neq.v6,sender_key.is.null,subject.is.null")
     .limit(limit)
 
   if (selErr) return NextResponse.json({ ok: false, error: selErr.message })
@@ -144,37 +161,91 @@ export async function POST(req: Request) {
 
   for (const row of candidates as Array<any>) {
     try {
-      const base = row.storage_path as string // e.g., emails-clean/{user}/{rawId}
-      const htmlPath = `${base}.html`.replace(/^emails-clean\//, "")
-      const txtPath = `${base}.txt`.replace(/^emails-clean\//, "")
-      // Lookup raw storage path then parse raw .eml to rebuild headers and body
-      const rawRow = await supabaseServiceRole
-        .from('messages_raw')
-        .select('storage_path')
-        .eq('id', row.raw_message_id)
-        .maybeSingle()
-      const rawPath = rawRow.data?.storage_path
-      if (!rawPath) { errors.push({ id: row.id, error: 'missing storage_path for raw' }); continue }
-      const rawDl = await supabaseServiceRole.storage.from("emails-raw").download(rawPath)
-      if (rawDl.error || !rawDl.data) { errors.push({ id: row.id, error: rawDl.error || 'raw download failed' }); continue }
-      const rawBuf = Buffer.from(await rawDl.data.arrayBuffer())
-      const parsed = await simpleParser(rawBuf)
-      const headers: Record<string, string | undefined> = {}
-      for (const [k,v] of parsed.headers) headers[k as string] = String(v)
-      const headerLines = (parsed as any).headerLines as Array<{ key: string; line: string }> | undefined
+      const base = (row.storage_path ?? undefined) as string | undefined // e.g., emails-clean/{user}/{rawId}
+      const htmlPath = row.html_url
+        ? String(row.html_url).replace(/^emails-clean\//, "")
+        : (typeof base === 'string' ? `${base}.html`.replace(/^emails-clean\//, "") : null)
+      const txtPath = row.text_url
+        ? String(row.text_url).replace(/^emails-clean\//, "")
+        : (typeof base === 'string' ? `${base}.txt`.replace(/^emails-clean\//, "") : null)
+      // Lookup raw storage path then parse raw .eml to rebuild headers and body; fallback to cleaned HTML/TXT if raw missing
+      let rawKey: string | null = null
+      try {
+        let rawId: string | null = row.raw_message_id != null ? String(row.raw_message_id) : null
+        if (rawId == null) {
+          const candidateTail = (typeof base === 'string' ? base : (typeof htmlPath === 'string' ? htmlPath : null))
+          if (candidateTail) {
+            const parts = String(candidateTail).split('/')
+            const last = parts[parts.length - 1].replace(/\.html$|\.txt$/i, '')
+            if (/^\d+$/.test(last)) rawId = last
+          }
+        }
+        if (rawId != null) {
+          const rawRow = await supabaseServiceRole
+            .from('messages_raw')
+            .select('storage_path')
+            .eq('id', rawId)
+            .maybeSingle()
+          const rawPath = rawRow.data?.storage_path || null
+          if (rawPath) rawKey = rawPath.replace(/^emails-raw\//, "")
+        }
+      } catch {}
+
+      let parsed: any = null
+      let headers: Record<string, string | undefined> = {}
+      let rawHtml: string = ""
+      let cleanHtml: string = ""
+      let text: string = ""
+
+      if (rawKey) {
+        const rawDl = await supabaseServiceRole.storage.from("emails-raw").download(rawKey)
+        if (!rawDl.error && rawDl.data) {
+          const rawBuf = Buffer.from(await rawDl.data.arrayBuffer())
+          parsed = await simpleParser(rawBuf)
+          if (parsed && parsed.headers) {
+            for (const [k,v] of parsed.headers as any) headers[(k as string).toLowerCase()] = String(v)
+          }
+          rawHtml = parsed?.html ? String(parsed.html) : ""
+          cleanHtml = sanitizeHtml(rawHtml, { allowedTags: sanitizeHtml.defaults.allowedTags.concat(["img","table","thead","tbody","tr","td","th"]), allowedAttributes: { a:["href","name","target","rel"], img:["src","alt","width","height"] } })
+          text = (parsed?.text as string) || htmlToText(cleanHtml, { wordwrap: 120 })
+        }
+      }
+      if (!parsed) {
+        // Fallback: use cleaned HTML/TXT from storage and existing headers_json
+        try {
+          if (htmlPath) {
+            const dlHtml = await supabaseServiceRole.storage.from('emails-clean').download(htmlPath)
+            if (!dlHtml.error && dlHtml.data) {
+            cleanHtml = await dlHtml.data.text()
+            }
+          }
+        } catch {}
+        try {
+          if (txtPath) {
+            const dlTxt = await supabaseServiceRole.storage.from('emails-clean').download(txtPath)
+            if (!dlTxt.error && dlTxt.data) {
+            text = await dlTxt.data.text()
+            }
+          }
+        } catch {}
+        if (!cleanHtml && text) {
+          // synthesize minimal HTML from text
+          cleanHtml = `<pre>${text.replace(/</g,'&lt;')}</pre>`
+        }
+        const hj = (row.headers_json || {}) as Record<string, any>
+        for (const k of Object.keys(hj)) headers[k.toLowerCase()] = (hj as any)[k]
+      }
+      const headerLines = (parsed as any)?.headerLines as Array<{ key: string; line: string }> | undefined
       const contentTypeRaw = headerLines?.find(h => h.key?.toLowerCase() === 'content-type')?.line
-      const rawHtml = parsed.html ? String(parsed.html) : ""
-      const cleanHtml = sanitizeHtml(rawHtml, { allowedTags: sanitizeHtml.defaults.allowedTags.concat(["img","table","thead","tbody","tr","td","th"]), allowedAttributes: { a:["href","name","target","rel"], img:["src","alt","width","height"] } })
-      const text = parsed.text || htmlToText(cleanHtml, { wordwrap: 120 })
 
       // Sender fields
-      const fromStructured = (parsed.from && Array.isArray((parsed as any).from?.value) && (parsed as any).from?.value?.[0]) || null
+      const fromStructured = parsed?.from && Array.isArray((parsed as any).from?.value) && (parsed as any).from?.value?.[0] || null
       const fromEmail = fromStructured?.address || (headers["from"]?.match(/<([^>]+)>/)?.[1] || headers["from"]) || null
       const fromDomain = fromEmail && fromEmail.includes("@") ? fromEmail.split("@").pop()!.toLowerCase() : (row.from_domain || null)
-      const rp = headers["return-path"] || headers["Return-Path"] || ""
+      const rp = headers["return-path"] || ""
       const rpEmail = rp.replace(/[<>]/g, "").trim()
       const rpDomain = rpEmail.includes("@") ? (rpEmail.split("@").pop() || null) : null
-      const dkimHeaders = ["dkim-signature","DKIM-Signature"].map(k => headers[k]).filter(Boolean) as string[]
+      const dkimHeaders = ["dkim-signature"].map(k => headers[k]).filter(Boolean) as string[]
       const dCandidates: string[] = []
       for (const dh of dkimHeaders) { const m = dh.match(/\bd=([^;\s]+)/); if (m && m[1]) dCandidates.push(m[1].toLowerCase()) }
       const fromReg = toRegistrableDomain(fromDomain)
@@ -183,7 +254,7 @@ export async function POST(req: Request) {
         const aligned = dCandidates.find(d => toRegistrableDomain(d) === fromReg)
         dkimDomain = aligned || dCandidates.find(d => !isEspDomain(d)) || dCandidates[0]
       }
-      const msgId = headers["message-id"] || headers["Message-Id"] || ""
+      const msgId = headers["message-id"] || ""
       const midMatch = msgId.match(/@([^>\s]+)>?$/)
       const midDomain = midMatch && midMatch[1] ? midMatch[1].toLowerCase() : null
       let chosen: string | null = null
@@ -200,9 +271,9 @@ export async function POST(req: Request) {
         return parts.join('.')
       }
       senderKey = normalizeRegistrableDup(senderKey)
-      const subject = parsed.subject || null
-      const receivedAtHeader = headers["date"] || headers["Date"]
-      const receivedAt = receivedAtHeader ? new Date(receivedAtHeader).toISOString() : (parsed.date ? new Date(parsed.date).toISOString() : null)
+      const subject = (parsed?.subject || row.subject || null)
+      const receivedAtHeader = headers["date"]
+      const receivedAt = receivedAtHeader ? new Date(receivedAtHeader).toISOString() : (parsed?.date ? new Date(parsed.date).toISOString() : null)
 
       const signals: Record<string, boolean> = {
         listId: !!headers["list-id"],
@@ -254,6 +325,21 @@ export async function POST(req: Request) {
           overrideTtl = (prof.data as any).override_ttl as string | null | undefined
         }
       }
+
+      // Time-invariant cold-start: recompute counts_30d relative to this message's received_at
+      try {
+        if (row.sender_key && receivedAt) {
+          const priorWindowStart = new Date(Date.parse(receivedAt) - 30*24*60*60*1000).toISOString()
+          const priorResp = await supabaseServiceRole
+            .from('messages_clean')
+            .select('id', { head: true, count: 'exact' })
+            .eq('user_id', user.id)
+            .eq('sender_key', row.sender_key)
+            .gte('received_at', priorWindowStart)
+            .lt('received_at', receivedAt)
+          counts30 = (priorResp.count as number) ?? counts30
+        }
+      } catch {}
 
       const subjectStr = subject || ''
       // Override gate (Beacon v5)
@@ -318,7 +404,7 @@ export async function POST(req: Request) {
               applied_rules: ['headline_alert_suppression']
             }
           } else {
-          const r = applyBeaconV4Lite({ signals, features, subject: subjectStr, senderCounts30d: counts30, minSpacingDays: spacing })
+      const r = applyBeaconV4Lite({ signals, features, subject: subjectStr, senderCounts30d: counts30, minSpacingDays: spacing })
           // LO/HI confidence gating mirrored from parse/run
           const LO = 0.15, HI = 0.85
           let p = typeof r.confidence === 'number' ? r.confidence : Number(r.confidence)
@@ -374,10 +460,10 @@ export async function POST(req: Request) {
           // Cadence tags based on spacing if available
           if (spacing != null) {
             if (spacing <= 2 && !appliedRules.includes('cadence_daily')) {
-              (reasons.top_reasons as any[]).unshift('daily cadence')
+              (r.reasons.top_reasons as any[]).unshift('daily cadence')
               appliedRules.push('cadence_daily')
             } else if (spacing <= 9 && !appliedRules.includes('cadence_weekly')) {
-              (reasons.top_reasons as any[]).unshift('weekly/biweekly cadence')
+              (r.reasons.top_reasons as any[]).unshift('weekly/biweekly cadence')
               appliedRules.push('cadence_weekly')
             }
           }
@@ -388,7 +474,7 @@ export async function POST(req: Request) {
             if (hasCue && !appliedRules.includes('subject_cue')) appliedRules.push('subject_cue')
           }
           const APPLIED_RULE_ORDER = [
-            'user_override','transactional_suppression','headline_alert_suppression','cold_start_gate','strong_headers','footer_i18n','esp_fingerprint','tracking_pixel','view_in_browser','simhash_strong','simhash_weak','cadence_monthly','sender_key_normalized','model','llm'
+            'user_override','transactional_suppression','headline_alert_suppression','cold_start_gate','cold_start_satisfied','strong_headers','footer_i18n','esp_fingerprint','tracking_pixel','view_in_browser','simhash_strong','simhash_weak','cadence_monthly','sender_key_normalized','model','llm'
           ]
           const seen = new Set<string>()
           const ordered = (rApplied as string[])
@@ -425,7 +511,7 @@ export async function POST(req: Request) {
           from_domain: fromDomain,
           subject: subject,
           received_at: receivedAt,
-          classifier_version: 'v5c',
+          classifier_version: 'v6',
           reasons
         })
         .eq('id', row.id)
@@ -437,12 +523,12 @@ export async function POST(req: Request) {
     }
   }
 
-  // Remaining count uses the same predicate as selection to avoid confusion (Beacon v5c)
+  // Remaining count uses the same predicate as selection (Beacon v6)
   const { count: remaining } = await supabaseServiceRole
     .from('messages_clean')
     .select('id', { head: true, count: 'exact' })
     .eq('user_id', user.id)
-    .or('classifier_version.is.null,classifier_version.neq.v5c,sender_key.is.null,subject.is.null')
+    .or('classifier_version.is.null,classifier_version.neq.v6,sender_key.is.null,subject.is.null')
 
   return NextResponse.json({ ok: true, selected: candidates.length, updated, remaining: remaining ?? 0, errors })
 }

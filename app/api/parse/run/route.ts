@@ -224,6 +224,7 @@ const APPLIED_RULE_ORDER = [
   "transactional_suppression",
   "headline_alert_suppression",
   "cold_start_gate",
+  "cold_start_satisfied",
   "strong_headers",
   "footer_i18n",
   "esp_fingerprint",
@@ -266,10 +267,10 @@ function shannonEntropy(values: string[]): number {
   return Number(H.toFixed(3))
 }
 
-// Beacon v4 rule thresholds (defaults; per-user tuning later)
-const HOST_ENTROPY_MIN_DEFAULT = 1.0
-const TEXT_TO_LINK_RATIO_COLDSTART_MIN = 120
-const BODY_LEN_COLDSTART_MIN = 500
+// Beacon v5e thresholds (aligned with re-enrich lite and docs)
+const HOST_ENTROPY_MIN_DEFAULT = 1.2
+const TEXT_TO_LINK_RATIO_COLDSTART_MIN = 200
+const BODY_LEN_COLDSTART_MIN = 700
 
 type BeaconInputs = {
   signals: Record<string, boolean>
@@ -306,23 +307,26 @@ function applyBeaconV4(inputs: BeaconInputs) {
   const reasons: string[] = []
   let positive = 0
   let negative = 0
+  const components: Record<string, number> = {}
+  // accumulate early applied rules before logistic/gray-zone handling
+  const appliedEarly: string[] = []
 
   // 1) Strong headers
-  if (signals.listId) { positive += 3; reasons.push("list-id header present") }
-  if (signals.listUnsubscribe) { positive += 2; reasons.push("list-unsubscribe present") }
-  if (signals.listUnsubscribeOneClick) { positive += 1; reasons.push("one-click unsubscribe") }
+  if (signals.listId) { positive += 3; reasons.push("list-id header present"); components.list_id = (components.list_id ?? 0) + 3 }
+  if (signals.listUnsubscribe) { positive += 2; reasons.push("list-unsubscribe present"); components.list_unsubscribe = (components.list_unsubscribe ?? 0) + 2 }
+  if (signals.listUnsubscribeOneClick) { positive += 1; reasons.push("one-click unsubscribe"); components.one_click = (components.one_click ?? 0) + 1 }
 
   // 2) Content/footer & ESP path
-  if (signals.viewInBrowser) { positive += 1; reasons.push("view in browser") }
-  if (signals.postalAddress) { positive += 1; reasons.push("postal address footer") }
-  if (features.i18n_unsubscribe_present) { positive += 1; reasons.push("i18n unsubscribe") }
-  if (features.esp_fingerprint) { positive += 1; reasons.push("ESP fingerprint") }
-  if (features.link_count > 8) { positive += 1; reasons.push("many links") }
-  if (features.tracking_pixel_present) { positive += 1; reasons.push("tracking pixel") }
+  if (signals.viewInBrowser) { positive += 1; reasons.push("view in browser"); components.view_in_browser = (components.view_in_browser ?? 0) + 1 }
+  if (signals.postalAddress) { positive += 1; reasons.push("postal address footer"); components.postal_address = (components.postal_address ?? 0) + 1 }
+  if (features.i18n_unsubscribe_present) { positive += 1; reasons.push("i18n unsubscribe"); components.i18n_unsubscribe = (components.i18n_unsubscribe ?? 0) + 1 }
+  if (features.esp_fingerprint) { positive += 1; reasons.push("ESP fingerprint"); components.esp_fingerprint = (components.esp_fingerprint ?? 0) + 1 }
+  if (features.link_count > 8) { positive += 1; reasons.push("many links"); components.many_links = (components.many_links ?? 0) + 1 }
+  if (features.tracking_pixel_present) { positive += 1; reasons.push("tracking pixel"); components.tracking_pixel = (components.tracking_pixel ?? 0) + 1 }
   // 2b) Subject/from cues (lightweight)
   const subj = subject || ""
   const subjectCue = /(newsletter|digest|round\s?up|round-up)/i.test(subj)
-  if (subjectCue) { positive += 0.5; reasons.push("subject cue") }
+  if (subjectCue) { positive += 0.5; reasons.push("subject cue"); components.subject_cue = (components.subject_cue ?? 0) + 0.5 }
 
   // 3) Transactional guards (lightweight)
   const transactional = /\b(order|receipt|invoice|otp|verification code|password reset|tracking number|ticket)\b/i
@@ -339,7 +343,7 @@ function applyBeaconV4(inputs: BeaconInputs) {
   const hostEntropyOk = features.host_entropy >= hostEntropyThreshold
   const lowExternalLinks = (features.external_link_ratio ?? 0) < 0.2
   // Treat entropy=0 as neutral and ignore entropy when very few external links
-  if (hostEntropyOk) { positive += 1; reasons.push("high host entropy") }
+  if (hostEntropyOk) { positive += 1; reasons.push("high host entropy"); components.entropy_ok = (components.entropy_ok ?? 0) + 1 }
 
   // 4b) Infra/personal guards unless strong newsletter path
   const senderReg = toRegistrableDomain(inputs.senderKey || null)
@@ -356,11 +360,11 @@ function applyBeaconV4(inputs: BeaconInputs) {
 
   // 5) Cadence hints from spacing (if available)
   if (minSpacingDays != null) {
-    if (minSpacingDays <= 2) { positive += 1; reasons.push("near-daily cadence") }
-    else if (minSpacingDays <= 9) { positive += 1; reasons.push("weekly/biweekly cadence") }
+    if (minSpacingDays <= 2) { positive += 1; reasons.push("near-daily cadence"); components.cadence = (components.cadence ?? 0) + 1 }
+    else if (minSpacingDays <= 9) { positive += 1; reasons.push("weekly/biweekly cadence"); components.cadence = (components.cadence ?? 0) + 1 }
   }
 
-  // 6) Cold-start explicit rule
+  // 6) Cold-start explicit rule (v5e thresholds)
   const coldStart = senderCounts30d <= 2
   const textToLink = features.body_char_len / Math.max(1, features.link_count)
   if (coldStart) {
@@ -373,15 +377,19 @@ function applyBeaconV4(inputs: BeaconInputs) {
         isNewsletter: false,
         confidence: 0.12,
         classifierSource: "rule",
-        reasons: { top_reasons: [], why_not_top: "cold-start: insufficient footer/volume/entropy", features: { host_entropy: features.host_entropy, text_to_link_ratio: Number(textToLink.toFixed(3)) } }
+        reasons: { top_reasons: [], why_not_top: "cold-start: insufficient footer/volume/entropy", features: { host_entropy: features.host_entropy, text_to_link_ratio: Number(textToLink.toFixed(3)) }, meta: { mapping: 'gate:cold_start' } }
       }
     }
     reasons.push("cold-start satisfied")
+    components.cold_start_satisfied = (components.cold_start_satisfied ?? 0) + 1
+    if (!appliedEarly.includes('cold_start_satisfied')) appliedEarly.push('cold_start_satisfied')
     positive += 1
   }
 
   // Aggregate decision
-  const score = Math.max(0, positive - Math.max(0, negative - 1))
+  const negPenalty = Math.max(0, negative - 1)
+  if (negPenalty > 0) components.negative_penalty = (components.negative_penalty ?? 0) - negPenalty
+  const score = Math.max(0, positive - negPenalty)
   const prelimIsNewsletter = score >= 3 || signals.listId === true
   // Confidence mapping + gating (LO/HI)
   const LO = 0.15, HI = 0.85
@@ -418,7 +426,7 @@ function applyBeaconV4(inputs: BeaconInputs) {
   const top_reasons = isNewsletter ? reasons.slice(0, 2) : []
   const why_not_top = isNewsletter ? undefined : (hostEntropyOk ? "signals insufficient" : "low host entropy")
 
-  const meta: Record<string, string> = {}
+  const meta: Record<string, any> = { mapping: 'logistic_v1', score: String(score), components }
   if (classifierSource === 'model') meta.model_version = MODEL_VERSION
   if (classifierSource === 'llm') meta.llm_prompt_version = LLM_PROMPT_VERSION
 
@@ -435,7 +443,7 @@ function applyBeaconV4(inputs: BeaconInputs) {
         link_count: features.link_count,
         tracking_pixel_present: features.tracking_pixel_present
       },
-      applied_rules: appliedRulesLocal,
+      applied_rules: orderAppliedRules([...(appliedRulesLocal || []), ...appliedEarly]),
       meta: Object.keys(meta).length ? meta : undefined
     }
   }
@@ -496,22 +504,60 @@ export async function POST(req: Request) {
   let parsed = 0
   const errors: Array<{ raw_id: string, error: unknown }> = []
 
+  // v5d pre-pass: parse minimal metadata to compute true earliest-per-sender in this batch
+  const preMetaById = new Map<string, {
+    headers: Record<string, string | undefined>
+    cleanHtml: string
+    text: string
+    fromEmail: string
+    fromDomain: string
+    senderKey: string | null
+    receivedAt: string | null
+  }>()
+  const earliestBySender = new Map<string, { rowId: string, receivedAtTs: number }>()
+
+  for (const r of rows as Array<{ id: string, raw_url: string }>) {
+    try {
+      const preDl = await supabaseServiceRole.storage.from("emails-raw").download(r.raw_url.replace("emails-raw/", ""))
+      if (preDl.error || !preDl.data) { errors.push({ raw_id: r.id, error: preDl.error || "download failed (pre)" }); continue }
+      const preBuf = Buffer.from(await preDl.data.arrayBuffer())
+      const preParsed = await simpleParser(preBuf)
+      const headers: Record<string, string | undefined> = {}
+      for (const [k, v] of preParsed.headers) headers[(k as string).toLowerCase()] = String(v)
+      const rawHtml = preParsed.html ? String(preParsed.html) : ""
+      const cleanHtml = sanitizeHtml(rawHtml, {
+        allowedTags: sanitizeHtml.defaults.allowedTags.concat(["img","table","thead","tbody","tr","td","th"]),
+        allowedAttributes: { a: ["href","name","target","rel"], img: ["src","alt","width","height"] }
+      })
+      const text = preParsed.text || htmlToText(cleanHtml, { wordwrap: 120 })
+      let fromEmail = (preParsed.from && Array.isArray((preParsed as any).from?.value) && (preParsed as any).from?.value?.[0]?.address) || ""
+      if (!fromEmail) {
+        const fromHeader = headers["from"] || ""
+        const emailMatch = fromHeader.match(/<([^>]+)>/) || fromHeader.match(/\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b/i)
+        fromEmail = emailMatch ? (emailMatch[1] || emailMatch[0]) : ""
+      }
+      const fromDomain = fromEmail && fromEmail.includes("@") ? fromEmail.split("@")[1].toLowerCase() : ""
+      let senderKey = extractSenderKey(headers, fromDomain || null)
+      senderKey = normalizeRegistrableDup(senderKey)
+      const receivedAtHeader = headers["date"] || headers["Date"]
+      const receivedAt = receivedAtHeader ? new Date(receivedAtHeader).toISOString() : null
+      preMetaById.set(r.id, { headers, cleanHtml, text, fromEmail, fromDomain, senderKey, receivedAt })
+      if (senderKey) {
+        const ts = receivedAt ? Date.parse(receivedAt) : Number.MAX_SAFE_INTEGER
+        const prev = earliestBySender.get(senderKey)
+        if (!prev || ts < prev.receivedAtTs) earliestBySender.set(senderKey, { rowId: r.id, receivedAtTs: ts })
+      }
+    } catch (e) { errors.push({ raw_id: r.id, error: String(e) }) }
+  }
+
   for (const r of rows as Array<{ id: string, raw_url: string }>) {
     // rows are already filtered to only unprocessed by the RPC
 
-    const dl = await retry(() => supabaseServiceRole.storage.from("emails-raw").download(r.raw_url.replace("emails-raw/", "")))
-    if (dl.error || !dl.data) { errors.push({ raw_id: r.id, error: dl.error || "download failed" }); continue }
-    const rawBuf = Buffer.from(await dl.data.arrayBuffer())
-
-    const parsedMail = await simpleParser(rawBuf)
-    const headers: Record<string, string | undefined> = {}
-    for (const [k, v] of parsedMail.headers) headers[k as string] = String(v)
-    const rawHtml = parsedMail.html ? String(parsedMail.html) : ""
-    const cleanHtml = sanitizeHtml(rawHtml, {
-      allowedTags: sanitizeHtml.defaults.allowedTags.concat(["img","table","thead","tbody","tr","td","th"]),
-      allowedAttributes: { a: ["href","name","target","rel"], img: ["src","alt","width","height"] }
-    })
-    const text = parsedMail.text || htmlToText(cleanHtml, { wordwrap: 120 })
+    const pre = preMetaById.get(r.id)
+    if (!pre) { errors.push({ raw_id: r.id, error: "preparse missing" }); continue }
+    const headers = pre.headers
+    const cleanHtml = pre.cleanHtml
+    const text = pre.text
 
     const { isNewsletter: prelimIsNewsletter, signals, score } = (() => {
       const r = detectNewsletterSignals(headers, cleanHtml, text)
@@ -519,21 +565,13 @@ export async function POST(req: Request) {
     })()
 
     // Enrichment fields
-    const subject = parsedMail.subject || ""
-    // Prefer structured From from mailparser; fallback to raw header regex
-    let fromEmail = (parsedMail.from && Array.isArray((parsedMail as any).from?.value) && (parsedMail as any).from?.value?.[0]?.address) || ""
-    if (!fromEmail) {
-      const fromHeader = headers["from"] || ""
-      const emailMatch = fromHeader.match(/<([^>]+)>/) || fromHeader.match(/\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b/i)
-      fromEmail = emailMatch ? (emailMatch[1] || emailMatch[0]) : ""
-    }
-    const fromDomain = fromEmail && fromEmail.includes("@") ? fromEmail.split("@")[1].toLowerCase() : ""
-    // Received at from message Date header when available
-    const receivedAtHeader = headers["date"] || headers["Date"]
-    const receivedAt = receivedAtHeader ? new Date(receivedAtHeader).toISOString() : null
+    const subject = (headers["subject"] || "") as string || ""
+    let fromEmail = pre.fromEmail
+    const fromDomain = pre.fromDomain
+    const receivedAt = pre.receivedAt
 
     // Sender key and template hash
-    let senderKey = extractSenderKey(headers, fromDomain || null)
+    let senderKey = pre.senderKey
     const beforeNorm = senderKey
     senderKey = normalizeRegistrableDup(senderKey)
     const templateHash = computeSimHashHex(tokenizeStructure(cleanHtml))
@@ -571,9 +609,8 @@ export async function POST(req: Request) {
     }
 
     // Compact headers_json subset
-    // Prefer raw header line for content-type to avoid "[object Object]"
-    const headerLines = (parsedMail as any).headerLines as Array<{ key: string; line: string }> | undefined
-    const contentTypeRaw = headerLines?.find(h => h.key?.toLowerCase() === 'content-type')?.line
+    // In pre-pass we don't retain raw header lines; fallback to canonical header value
+    const contentTypeRaw: string | undefined = undefined
 
     const headersJson = {
       list_id: headers["list-id"] || null,
@@ -697,37 +734,48 @@ export async function POST(req: Request) {
             applied_rules: ["headline_alert_suppression"]
           }
         } else {
-        // Cold-start strict gate: fire on FIRST message (no profile or 0 in last 30d)
-        const counts30 = (existingProfile?.counts_30d ?? 0)
-        const isColdStart = (existingProfile == null) || counts30 === 0
+        // Cold-start v5d: prior DB count in last 30d AND true earliest in this batch
+        const priorWindowStart = (receivedAt ? new Date(Date.parse(receivedAt) - 30*24*60*60*1000) : new Date(Date.now() - 30*24*60*60*1000)).toISOString()
+        const priorResp = senderKey ? await supabaseServiceRole
+          .from('messages_clean')
+          .select('id', { head: true, count: 'exact' })
+          .eq('user_id', user.id)
+          .eq('sender_key', senderKey)
+          .gte('received_at', priorWindowStart)
+          .lt('received_at', receivedAt || new Date().toISOString()) : { count: 0 }
+        const priorCount = (priorResp as any).count ?? 0
+        const isTrueFirstInBatch = !!(senderKey && earliestBySender.get(senderKey)?.rowId === r.id)
+        const isColdStart = (priorCount === 0) && isTrueFirstInBatch
         if (isColdStart) {
           const textToLink = features.body_char_len / Math.max(1, features.link_count)
           const hasFooterOrEsp = !!(signals.listUnsubscribe || signals.unsubscribeLink || signals.managePrefs || signals.postalAddress || features.esp_fingerprint || features.has_view_in_browser || features.i18n_unsubscribe_present)
-          const hasVolume = (features.body_char_len >= 700) || (textToLink >= 200)
-          const entropyOk = features.host_entropy >= 1.2
+          const hasVolume = (features.body_char_len >= BODY_LEN_COLDSTART_MIN) || (textToLink >= TEXT_TO_LINK_RATIO_COLDSTART_MIN)
+          const entropyOk = features.host_entropy >= HOST_ENTROPY_MIN_DEFAULT
           if (!(hasFooterOrEsp && hasVolume && entropyOk)) {
             isNewsletter = false
-            confidence = 0.10
+            confidence = 0.12
             classifierSource = "rule"
             reasons = {
               top_reasons: [],
-              why_not_top: "cold_start_requirements_not_met",
+              why_not_top: "cold-start: insufficient footer/volume/entropy",
               features: {
                 host_entropy: features.host_entropy,
                 text_to_link_ratio: Number(((features.body_char_len)/Math.max(1,features.link_count)).toFixed(3)),
                 link_count: features.link_count,
                 tracking_pixel_present: features.tracking_pixel_present
               },
-              applied_rules: ["cold_start_gate"]
+              applied_rules: ["cold_start_gate"],
+              meta: { mapping: 'gate:cold_start' }
             }
           } else {
+            const counts30Val = existingProfile?.counts_30d || 0
             const r = applyBeaconV4({
               signals,
               features,
               subject,
               fromDomain,
               senderKey,
-              senderCounts30d: counts30,
+              senderCounts30d: counts30Val,
               minSpacingDays: (existingProfile?.min_spacing_days as number | null) ?? null,
               hostEntropyMinOverride: hostEntropyP40
             })
@@ -820,6 +868,27 @@ export async function POST(req: Request) {
       reasons = { ...reasons, applied_rules: orderAppliedRules(appliedRules) }
     }
 
+    // Auto-promote sender to newsletter for digest purposes on high-confidence positives (v5d)
+    if (senderKey && isNewsletter && confidence >= 0.85) {
+      // annotate this message as the promoter
+      try {
+        const metaPrev: any = (reasons as any).meta || {}
+        const meta = { ...metaPrev, promoted_sender: true, promoted_confidence: Number(confidence.toFixed(2)) }
+        reasons = { ...reasons, meta }
+      } catch {}
+      // persist override at sender level (TTL null)
+      try {
+        await supabaseServiceRole
+          .from("sender_profiles")
+          .upsert({
+            user_id: user.id,
+            sender_key: senderKey,
+            override_is_newsletter: true,
+            override_ttl: null
+          }, { onConflict: "user_id,sender_key" })
+      } catch {}
+    }
+
     const base = `${user.id}/${r.id}`
     const upHtml = await retry(() => supabaseServiceRole.storage.from("emails-clean").upload(`${base}.html`, new Blob([cleanHtml], { type: "text/html" }), { upsert: true }))
     const upTxt = await retry(() => supabaseServiceRole.storage.from("emails-clean").upload(`${base}.txt`, new Blob([text], { type: "text/plain" }), { upsert: true }))
@@ -840,7 +909,7 @@ export async function POST(req: Request) {
       template_hash: templateHash,
       confidence,
       classifier_source: classifierSource,
-      classifier_version: 'v5c',
+      classifier_version: 'v6',
       reasons,
       from_email: fromEmail || null,
       from_domain: fromDomain || null,
