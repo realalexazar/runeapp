@@ -4,6 +4,8 @@ import { supabaseServiceRole } from "@/lib/supabase/service"
 import { htmlToText } from "html-to-text"
 import sanitizeHtml from "sanitize-html"
 import { simpleParser } from "mailparser"
+// v6.3: Use onboarding snapshot promotion; disable per-message auto-single promotion for parity
+const ENABLE_AUTO_SINGLE_PROMOTE = false
 
 // Reuse helpers from parse/run by duplicating minimal logic to avoid cross-file exports
 import { toRegistrableDomain, isEspDomain } from "@/lib/newsletters/domain"
@@ -81,7 +83,7 @@ function hammingDistanceHex(a: string, b: string): number {
 
 function applyBeaconV4Lite(inputs: any) {
   // Minimal reuse: expect same fields as parse/run's applyBeaconV4
-  const { signals, features, subject, senderCounts30d, minSpacingDays } = inputs
+  const { signals, features, subject, senderCounts30d, minSpacingDays, hostEntropyMinOverride } = inputs
   const HOST_ENTROPY_MIN_DEFAULT = 1.2
   const TEXT_TO_LINK_RATIO_COLDSTART_MIN = 200
   const BODY_LEN_COLDSTART_MIN = 700
@@ -90,9 +92,21 @@ function applyBeaconV4Lite(inputs: any) {
   let positive = 0
   let negative = 0
   const components: Record<string, number> = {}
-  if (signals.listId) { positive += 3; reasons.push("list-id header present") }
-  if (signals.listUnsubscribe) { positive += 2; reasons.push("list-unsubscribe present") }
-  if (signals.listUnsubscribeOneClick) { positive += 1; reasons.push("one-click unsubscribe") }
+  if (signals.listId) {
+    positive += 3
+    reasons.push("list-id header present")
+    components.list_id = (components.list_id ?? 0) + 3
+  }
+  if (signals.listUnsubscribe) {
+    positive += 2
+    reasons.push("list-unsubscribe present")
+    components.list_unsubscribe = (components.list_unsubscribe ?? 0) + 2
+  }
+  if (signals.listUnsubscribeOneClick) {
+    positive += 1
+    reasons.push("one-click unsubscribe")
+    components.one_click = (components.one_click ?? 0) + 1
+  }
   if (signals.viewInBrowser) { positive += 1; reasons.push("view in browser"); components.view_in_browser = (components.view_in_browser ?? 0) + 1 }
   if (signals.postalAddress) { positive += 1; reasons.push("postal address footer"); components.postal_address = (components.postal_address ?? 0) + 1 }
   if (features.i18n_unsubscribe_present) { positive += 1; reasons.push("i18n unsubscribe"); components.i18n_unsubscribe = (components.i18n_unsubscribe ?? 0) + 1 }
@@ -104,7 +118,10 @@ function applyBeaconV4Lite(inputs: any) {
   if (subjectCue) { positive += 0.5; reasons.push("subject cue"); components.subject_cue = (components.subject_cue ?? 0) + 0.5 }
   const transactional = /\b(order|receipt|invoice|otp|verification code|password reset|tracking number|ticket)\b/i.test(subject || "")
   if (transactional && !signals.listId && !signals.listUnsubscribe) { negative += 3; reasons.push("transactional terms without list headers") }
-  const hostEntropyOk = features.host_entropy >= HOST_ENTROPY_MIN_DEFAULT
+  const hostEntropyThreshold = typeof hostEntropyMinOverride === 'number' && !Number.isNaN(hostEntropyMinOverride)
+    ? hostEntropyMinOverride
+    : HOST_ENTROPY_MIN_DEFAULT
+  const hostEntropyOk = features.host_entropy >= hostEntropyThreshold
   if (hostEntropyOk) { positive += 1; reasons.push("high host entropy"); components.entropy_ok = (components.entropy_ok ?? 0) + 1 } else { negative += 1 }
   if (minSpacingDays != null) { if (minSpacingDays <= 2) { positive += 1; reasons.push("near-daily cadence"); components.cadence = (components.cadence ?? 0) + 1 } else if (minSpacingDays <= 9) { positive += 1; reasons.push("weekly/biweekly cadence"); components.cadence = (components.cadence ?? 0) + 1 } }
   const coldStart = (senderCounts30d || 0) <= 1
@@ -130,6 +147,10 @@ function applyBeaconV4Lite(inputs: any) {
   const score = Math.max(0, positive - negPenalty)
   const isNewsletter = score >= 3 || signals.listId === true
   // Logistic mapping to match parse
+  // Ensure components is summable even when empty
+  if (Object.keys(components).length === 0) {
+    components.baseline = 0
+  }
   const logistic = (x: number) => 1 / (1 + Math.exp(-1.2 * (x - 3)))
   const confidence = Number(Math.max(0, Math.min(1, logistic(score))).toFixed(2))
   const meta: any = { mapping: 'logistic_v1', score: String(score), components }
@@ -142,15 +163,20 @@ export async function POST(req: Request) {
   if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
 
   let limit = 200
-  try { const body = await req.json(); if (body && typeof body.limit === 'number') limit = Math.max(1, Math.min(500, Math.floor(body.limit))) } catch {}
+  let rebuildRollups = true
+  try {
+    const body = await req.json()
+    if (body && typeof body.limit === 'number') limit = Math.max(1, Math.min(500, Math.floor(body.limit)))
+    if (body && body.rebuildRollups === false) rebuildRollups = false
+  } catch {}
 
   // Select candidate cleans that need re-enrich
   const { data: candidates, error: selErr } = await supabaseServiceRole
     .from("messages_clean")
     .select("id, raw_message_id, storage_path, html_url, text_url, headers_json, from_domain, sender_key, subject")
     .eq("user_id", user.id)
-    // Re-enrich if version is old OR critical metadata missing (Beacon v6)
-    .or("classifier_version.is.null,classifier_version.neq.v6,sender_key.is.null,subject.is.null")
+    // Re-enrich if version is old OR critical metadata missing (Beacon v6.1: include headers/features gaps)
+    .or("classifier_version.is.null,classifier_version.neq.v6,sender_key.is.null,subject.is.null,headers_json.is.null,features_json.is.null")
     .limit(limit)
 
   if (selErr) return NextResponse.json({ ok: false, error: selErr.message })
@@ -342,6 +368,28 @@ export async function POST(req: Request) {
       } catch {}
 
       const subjectStr = subject || ''
+      // Time-invariant per-sender P40 host entropy (only prior rows)
+      let hostEntropyP40: number | null = null
+      try {
+        if (row.sender_key && receivedAt) {
+          const priorEnt = await supabaseServiceRole
+            .from('messages_clean')
+            .select('features_json, received_at')
+            .eq('user_id', user.id)
+            .eq('sender_key', row.sender_key)
+            .lt('received_at', receivedAt)
+            .order('received_at', { ascending: false })
+            .limit(50)
+          const vals = (priorEnt.data || [])
+            .map(r => (r as any).features_json?.host_entropy)
+            .filter((x: any) => typeof x === 'number' && !Number.isNaN(x)) as number[]
+          if (vals.length > 5) {
+            const sorted = vals.slice().sort((a, b) => a - b)
+            const idx = Math.max(0, Math.min(sorted.length - 1, Math.floor(0.40 * (sorted.length - 1))))
+            hostEntropyP40 = Number(sorted[idx].toFixed(3))
+          }
+        }
+      } catch {}
       // Override gate (Beacon v5)
       const overrideActive = (() => {
         if (overrideVal == null) return false
@@ -358,7 +406,8 @@ export async function POST(req: Request) {
         isNewsletter = !!overrideVal
         confidence = 0.99
         classifierSource = 'rule'
-        reasons = { top_reasons: ['user override'], features: { host_entropy: features.host_entropy, text_to_link_ratio: Number((features.body_char_len/Math.max(1,features.link_count)).toFixed(3)), link_count: features.link_count, tracking_pixel_present: features.tracking_pixel_present }, applied_rules: ['user_override'] }
+        const ar: string[] = ['auto_promote']
+        reasons = { top_reasons: ['auto promotion'], features: { host_entropy: features.host_entropy, text_to_link_ratio: Number((features.body_char_len/Math.max(1,features.link_count)).toFixed(3)), link_count: features.link_count, tracking_pixel_present: features.tracking_pixel_present }, applied_rules: ar }
       } else {
         // Transactional suppression gate (Beacon v5)
         const autoSubmitted = /auto-?submitted/i.test(String(headers["auto-submitted"] || headers["Auto-Submitted"] || ""))
@@ -404,7 +453,7 @@ export async function POST(req: Request) {
               applied_rules: ['headline_alert_suppression']
             }
           } else {
-      const r = applyBeaconV4Lite({ signals, features, subject: subjectStr, senderCounts30d: counts30, minSpacingDays: spacing })
+      const r = applyBeaconV4Lite({ signals, features, subject: subjectStr, senderCounts30d: counts30, minSpacingDays: spacing, hostEntropyMinOverride: hostEntropyP40 })
           // LO/HI confidence gating mirrored from parse/run
           const LO = 0.15, HI = 0.85
           let p = typeof r.confidence === 'number' ? r.confidence : Number(r.confidence)
@@ -474,7 +523,25 @@ export async function POST(req: Request) {
             if (hasCue && !appliedRules.includes('subject_cue')) appliedRules.push('subject_cue')
           }
           const APPLIED_RULE_ORDER = [
-            'user_override','transactional_suppression','headline_alert_suppression','cold_start_gate','cold_start_satisfied','strong_headers','footer_i18n','esp_fingerprint','tracking_pixel','view_in_browser','simhash_strong','simhash_weak','cadence_monthly','sender_key_normalized','model','llm'
+            'user_override',
+            'transactional_suppression',
+            'headline_alert_suppression',
+            'cold_start_gate',
+            'cold_start_satisfied',
+            'strong_headers',
+            'footer_i18n',
+            'esp_fingerprint',
+            'tracking_pixel',
+            'view_in_browser',
+            'subject_cue',
+            'simhash_strong',
+            'simhash_weak',
+            'cadence_daily',
+            'cadence_weekly',
+            'cadence_monthly',
+            'sender_key_normalized',
+            'model',
+            'llm'
           ]
           const seen = new Set<string>()
           const ordered = (rApplied as string[])
@@ -487,6 +554,26 @@ export async function POST(req: Request) {
           }
         }
       }
+
+      // Auto-promote sender to newsletter for digest purposes on high-confidence positives (v6.1 parity)
+      try {
+        if (ENABLE_AUTO_SINGLE_PROMOTE && senderKey && isNewsletter && confidence >= 0.85) {
+          // annotate this message as the promoter
+          try {
+            const metaPrev: any = (reasons as any).meta || {}
+            const meta = { ...metaPrev, promoted_sender: true, promoted_confidence: Number(confidence.toFixed(2)), promotion_source: 'auto_single' }
+            reasons = { ...reasons, meta }
+          } catch {}
+          await supabaseServiceRole
+            .from('sender_profiles')
+            .upsert({
+              user_id: user.id,
+              sender_key: senderKey,
+              override_is_newsletter: true,
+              override_ttl: null
+            }, { onConflict: 'user_id,sender_key' })
+        }
+      } catch {}
 
       const { error: upErr } = await supabaseServiceRole
         .from('messages_clean')
@@ -522,6 +609,147 @@ export async function POST(req: Request) {
       errors.push({ id: row.id, error: String(e) })
     }
   }
+
+  // Optional one-shot rollup rebuild for parity with parse (counts/spacing/centroids/cadence)
+  if (rebuildRollups) {
+    try {
+      const all = await supabaseServiceRole
+        .from('messages_clean')
+        .select('sender_key, received_at, template_hash')
+        .eq('user_id', user.id)
+      const items = (all.data || []).filter((r: any) => !!r.sender_key)
+      const bySender = new Map<string, Array<{ receivedAt: Date, templateHash: string | null }>>()
+      const now = new Date()
+      const cutoff7 = new Date(now.getTime() - 7*24*60*60*1000)
+      const cutoff30 = new Date(now.getTime() - 30*24*60*60*1000)
+      for (const r of items) {
+        const k = String(r.sender_key)
+        const ra = new Date(r.received_at as unknown as string)
+        const th = (r as any).template_hash || null
+        const arr = bySender.get(k) || []
+        arr.push({ receivedAt: ra, templateHash: typeof th === 'string' ? th : null })
+        bySender.set(k, arr)
+      }
+      const upserts: any[] = []
+      for (const [senderKey, list] of bySender.entries()) {
+        const sorted = list.slice().sort((a, b) => a.receivedAt.getTime() - b.receivedAt.getTime())
+        const counts7 = sorted.reduce((acc, x) => acc + (x.receivedAt >= cutoff7 ? 1 : 0), 0)
+        const counts30 = sorted.reduce((acc, x) => acc + (x.receivedAt >= cutoff30 ? 1 : 0), 0)
+        const firstSeen = sorted[0]?.receivedAt?.toISOString() || null
+        const lastSeen = sorted[sorted.length - 1]?.receivedAt?.toISOString() || null
+        let minSpacingDays: number | null = null
+        let sameDayBuckets30d = 0
+        let prevDate: Date | null = null
+        for (const x of sorted) {
+          const d = new Date(Date.UTC(x.receivedAt.getUTCFullYear(), x.receivedAt.getUTCMonth(), x.receivedAt.getUTCDate()))
+          if (prevDate) {
+            const diffDays = Math.round((d.getTime() - prevDate.getTime()) / (24*60*60*1000))
+            if (diffDays > 0) {
+              minSpacingDays = minSpacingDays == null ? diffDays : Math.min(minSpacingDays, diffDays)
+            }
+          }
+          prevDate = d
+        }
+        // same-day buckets over last 30d
+        {
+          const dayKey = (dt: Date) => `${dt.getUTCFullYear()}-${dt.getUTCMonth()+1}-${dt.getUTCDate()}`
+          const countsByDay = new Map<string, number>()
+          for (const x of sorted) {
+            if (x.receivedAt >= cutoff30) {
+              const key = dayKey(x.receivedAt)
+              countsByDay.set(key, (countsByDay.get(key) || 0) + 1)
+            }
+          }
+          for (const c of countsByDay.values()) sameDayBuckets30d += Math.max(0, c - 1)
+        }
+        // template centroids: latest 3 by last-seen time
+        const lastByHash = new Map<string, number>()
+        for (const x of sorted) {
+          if (x.templateHash) {
+            const ts = x.receivedAt.getTime()
+            const prev = lastByHash.get(x.templateHash) || 0
+            if (ts > prev) lastByHash.set(x.templateHash, ts)
+          }
+        }
+        const centroids = Array.from(lastByHash.entries())
+          .sort((a, b) => b[1] - a[1])
+          .slice(0, 3)
+          .map(([h]) => h)
+        const cadenceFlags: string[] = []
+        if (minSpacingDays != null) {
+          if (minSpacingDays <= 2) cadenceFlags.push('daily')
+          else if (minSpacingDays <= 9) cadenceFlags.push('weekly')
+          else if (minSpacingDays <= 16) cadenceFlags.push('biweekly')
+          else cadenceFlags.push('monthly')
+        }
+        upserts.push({
+          user_id: user.id,
+          sender_key: senderKey,
+          counts_7d: counts7,
+          counts_30d: counts30,
+          first_seen_at: firstSeen,
+          last_seen_at: lastSeen,
+          min_spacing_days: minSpacingDays,
+          same_day_buckets_30d: sameDayBuckets30d,
+          template_centroids: centroids,
+          cadence_flags: cadenceFlags,
+          updated_at: new Date().toISOString()
+        })
+      }
+      if (upserts.length > 0) {
+        await supabaseServiceRole
+          .from('sender_profiles')
+          .upsert(upserts, { onConflict: 'user_id,sender_key' })
+      }
+    } catch {}
+  }
+
+  // Onboarding snapshot promotion (Beacon v6.3): promote stable newsletter senders based on 30d stats
+  try {
+    const since30 = new Date(Date.now() - 30*24*60*60*1000).toISOString()
+    const { data: rows30 } = await supabaseServiceRole
+      .from('messages_clean')
+      .select('sender_key, received_at, confidence')
+      .eq('user_id', user.id)
+      .gte('received_at', since30)
+    const perSender: Map<string, Array<{ d: Date, c: number }>> = new Map()
+    for (const r of (rows30 || [])) {
+      const k = (r as any).sender_key as string | null
+      if (!k) continue
+      const d = new Date((r as any).received_at as string)
+      const cRaw = (r as any).confidence
+      const c = typeof cRaw === 'number' ? cRaw : Number(cRaw)
+      if (Number.isNaN(c)) continue
+      const arr = perSender.get(k) || []
+      arr.push({ d, c })
+      perSender.set(k, arr)
+    }
+    const promote: Array<{ user_id: string, sender_key: string, override_is_newsletter: boolean, override_ttl: null }> = []
+    for (const [senderKey, list] of perSender.entries()) {
+      const msgs30 = list.length
+      if (msgs30 === 0) continue
+      const confs = list.map(x => x.c).sort((a, b) => a - b)
+      const mid = Math.floor(confs.length / 2)
+      const median = confs.length % 2 === 1 ? confs[mid] : (confs[mid - 1] + confs[mid]) / 2
+      const hiDays = (() => {
+        const days = new Set<string>()
+        for (const x of list) {
+          if (x.c >= 0.85) {
+            const key = `${x.d.getUTCFullYear()}-${x.d.getUTCMonth()+1}-${x.d.getUTCDate()}`
+            days.add(key)
+          }
+        }
+        return days.size
+      })()
+      const rule = (msgs30 >= 4 && median >= 0.85) || (hiDays >= 2)
+      if (rule) promote.push({ user_id: user.id, sender_key: senderKey, override_is_newsletter: true, override_ttl: null })
+    }
+    if (promote.length > 0) {
+      await supabaseServiceRole
+        .from('sender_profiles')
+        .upsert(promote, { onConflict: 'user_id,sender_key' })
+    }
+  } catch {}
 
   // Remaining count uses the same predicate as selection (Beacon v6)
   const { count: remaining } = await supabaseServiceRole

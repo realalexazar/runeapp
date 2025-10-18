@@ -298,6 +298,8 @@ const PERSONAL_PROVIDERS = new Set(["gmail.com","outlook.com","hotmail.com","yah
 const ENABLE_MONTHLY = true
 const ENABLE_MODEL = false
 const ENABLE_LLM = false
+// v6.3: Use onboarding snapshot promotion; disable per-message auto-single promotion for parity
+const ENABLE_AUTO_SINGLE_PROMOTE = false
 const MODEL_VERSION = "v0"
 const LLM_PROMPT_VERSION = "v0"
 
@@ -391,6 +393,10 @@ function applyBeaconV4(inputs: BeaconInputs) {
   if (negPenalty > 0) components.negative_penalty = (components.negative_penalty ?? 0) - negPenalty
   const score = Math.max(0, positive - negPenalty)
   const prelimIsNewsletter = score >= 3 || signals.listId === true
+  // Ensure components is summable even when empty
+  if (Object.keys(components).length === 0) {
+    components.baseline = 0
+  }
   // Confidence mapping + gating (LO/HI)
   const LO = 0.15, HI = 0.85
   const logistic = (x: number) => 1 / (1 + Math.exp(-1.2 * (x - 3)))
@@ -588,25 +594,28 @@ export async function POST(req: Request) {
       existingProfile = existingResp.data || null
     }
 
-    // Compute per-sender host entropy P40 from recent messages (ephemeral override)
+    // Time-invariant per-sender P40 host entropy (only prior rows, k > 5)
     let hostEntropyP40: number | null = null
-    if (senderKey) {
-      const recent = await supabaseServiceRole
-        .from("messages_clean")
-        .select("features_json, received_at")
-        .eq("user_id", user.id)
-        .eq("sender_key", senderKey)
-        .order("received_at", { ascending: false })
-        .limit(50)
-      const vals = (recent.data || [])
-        .map(r => (r as any).features_json?.host_entropy)
-        .filter((x: any) => typeof x === 'number' && !Number.isNaN(x)) as number[]
-      if (vals.length >= 5) {
-        const sorted = vals.slice().sort((a, b) => a - b)
-        const idx = Math.max(0, Math.min(sorted.length - 1, Math.floor(0.40 * (sorted.length - 1))))
-        hostEntropyP40 = Number(sorted[idx].toFixed(3))
+    try {
+      if (senderKey && receivedAt) {
+        const priorEnt = await supabaseServiceRole
+          .from("messages_clean")
+          .select("features_json, received_at")
+          .eq("user_id", user.id)
+          .eq("sender_key", senderKey)
+          .lt("received_at", receivedAt)
+          .order("received_at", { ascending: false })
+          .limit(50)
+        const vals = (priorEnt.data || [])
+          .map(r => (r as any).features_json?.host_entropy)
+          .filter((x: any) => typeof x === 'number' && !Number.isNaN(x)) as number[]
+        if (vals.length > 5) {
+          const sorted = vals.slice().sort((a, b) => a - b)
+          const idx = Math.max(0, Math.min(sorted.length - 1, Math.floor(0.40 * (sorted.length - 1))))
+          hostEntropyP40 = Number(sorted[idx].toFixed(3))
+        }
       }
-    }
+    } catch {}
 
     // Compact headers_json subset
     // In pre-pass we don't retain raw header lines; fallback to canonical header value
@@ -688,8 +697,10 @@ export async function POST(req: Request) {
       isNewsletter = !!overrideVal
       confidence = 0.99
       classifierSource = "rule"
-      reasons.top_reasons = ["user override"]
-      reasons.applied_rules.push("user_override")
+      reasons.top_reasons = ["auto promotion"]
+      const ar: string[] = Array.isArray((reasons as any).applied_rules) ? (reasons as any).applied_rules : []
+      if (!ar.includes("auto_promote")) ar.push("auto_promote")
+      reasons = { ...reasons, applied_rules: ar }
     } else {
       // Transactional suppression gate (Beacon v5)
       const autoSubmitted = /auto-?submitted/i.test(String(headers["auto-submitted"] || headers["Auto-Submitted"] || ""))
@@ -868,12 +879,12 @@ export async function POST(req: Request) {
       reasons = { ...reasons, applied_rules: orderAppliedRules(appliedRules) }
     }
 
-    // Auto-promote sender to newsletter for digest purposes on high-confidence positives (v5d)
-    if (senderKey && isNewsletter && confidence >= 0.85) {
+    // Auto-promote on single high-confidence disabled in v6.3 (use snapshot promotion instead)
+    if (ENABLE_AUTO_SINGLE_PROMOTE && senderKey && isNewsletter && confidence >= 0.85) {
       // annotate this message as the promoter
       try {
         const metaPrev: any = (reasons as any).meta || {}
-        const meta = { ...metaPrev, promoted_sender: true, promoted_confidence: Number(confidence.toFixed(2)) }
+        const meta = { ...metaPrev, promoted_sender: true, promoted_confidence: Number(confidence.toFixed(2)), promotion_source: "auto_single" }
         reasons = { ...reasons, meta }
       } catch {}
       // persist override at sender level (TTL null)
@@ -999,6 +1010,53 @@ export async function POST(req: Request) {
     .select("id", { head: true, count: "exact" })
     .eq("user_id", user.id)
   const rawTotal = rawCount.count ?? 0
+
+  // Onboarding snapshot promotion (Beacon v6.3): promote stable newsletter senders based on 30d stats
+  try {
+    const since30 = new Date(Date.now() - 30*24*60*60*1000).toISOString()
+    const { data: rows30 } = await supabaseServiceRole
+      .from('messages_clean')
+      .select('sender_key, received_at, confidence')
+      .eq('user_id', user.id)
+      .gte('received_at', since30)
+    const perSender: Map<string, Array<{ d: Date, c: number }>> = new Map()
+    for (const r of (rows30 || [])) {
+      const k = (r as any).sender_key as string | null
+      if (!k) continue
+      const d = new Date((r as any).received_at as string)
+      const cRaw = (r as any).confidence
+      const c = typeof cRaw === 'number' ? cRaw : Number(cRaw)
+      if (Number.isNaN(c)) continue
+      const arr = perSender.get(k) || []
+      arr.push({ d, c })
+      perSender.set(k, arr)
+    }
+    const promote: Array<{ user_id: string, sender_key: string, override_is_newsletter: boolean, override_ttl: null }> = []
+    for (const [senderKey, list] of perSender.entries()) {
+      const msgs30 = list.length
+      if (msgs30 === 0) continue
+      const confs = list.map(x => x.c).sort((a, b) => a - b)
+      const mid = Math.floor(confs.length / 2)
+      const median = confs.length % 2 === 1 ? confs[mid] : (confs[mid - 1] + confs[mid]) / 2
+      const hiDays = (() => {
+        const days = new Set<string>()
+        for (const x of list) {
+          if (x.c >= 0.85) {
+            const key = `${x.d.getUTCFullYear()}-${x.d.getUTCMonth()+1}-${x.d.getUTCDate()}`
+            days.add(key)
+          }
+        }
+        return days.size
+      })()
+      const rule = (msgs30 >= 4 && median >= 0.85) || (hiDays >= 2)
+      if (rule) promote.push({ user_id: user.id, sender_key: senderKey, override_is_newsletter: true, override_ttl: null })
+    }
+    if (promote.length > 0) {
+      await supabaseServiceRole
+        .from('sender_profiles')
+        .upsert(promote, { onConflict: 'user_id,sender_key' })
+    }
+  } catch {}
 
   const remaining = Math.max(0, rawTotal - afterCleanCount)
   const parsedDelta = Math.max(0, afterCleanCount - beforeCleanCount)
