@@ -71,7 +71,11 @@ export async function GET(request: Request) {
     // Non-blocking initialization of system_state. Table schemas can differ.
     const { error: systemStateError } = await supabaseServiceRole
       .from("system_state")
-      .upsert({ user_id: user.id }, { onConflict: 'user_id' });
+      .upsert({ 
+        user_id: user.id, 
+        key: "default",
+        value: "\"backfill\"" // JSON string
+      }, { onConflict: 'user_id' });
     if (systemStateError) {
       console.warn("Non-blocking system_state init error:", systemStateError);
     }

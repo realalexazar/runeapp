@@ -29,6 +29,7 @@
     "mailparser": "^3.7.4",
     "next": "^15.5.2",
     "next-themes": "^0.3.0",
+    "p-limit": "^7.2.0",
     "prettier": "^3.3.3",
     "prettier-plugin-tailwindcss": "^0.6.6",
     "react": "^18.3.1",

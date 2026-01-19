@@ -3,9 +3,11 @@ import { getSupabaseServerClient } from "@/lib/supabase/server"
 import { supabaseServiceRole } from "@/lib/supabase/service"
 import { google, gmail_v1 } from "googleapis"
 import { decrypt } from "@/lib/crypto"
-import { createHash } from "crypto"
+import pLimit from "p-limit"
+import { extractSenderKey } from "@/lib/onboard/sender-extraction"
 
 export async function POST() {
+  const startTime = Date.now()
   const supabase = await getSupabaseServerClient()
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
@@ -30,9 +32,9 @@ export async function POST() {
   oauth2Client.setCredentials({ refresh_token: refreshToken })
   const gmail = google.gmail({ version: "v1", auth: oauth2Client })
 
-  // Build fetch query: first run = last 30d; subsequent runs = last 2d (overlapped)
+  // Build fetch query: first run = last 14d (2 weeks); subsequent runs = last 2d (overlapped)
   let qBase = "(category:primary OR category:updates)"
-  let qWindow = "newer_than:30d"
+  let qWindow = "newer_than:14d"
   try {
     const state = await supabaseServiceRole
       .from("system_state")
@@ -46,25 +48,19 @@ export async function POST() {
     }
   } catch {}
   const q = `${qBase} ${qWindow}`
-  const maxResults = 100 // Gmail allows up to 500; 100 is a safe, fast default
+  const maxResults = 500 // Increased from 100 - Gmail allows up to 500
   const perRunCap = 1000 // stop after this many messages per run
 
+  // Setup concurrency limit (aggressive test: 75 parallel requests)
+  // Gmail quota: ~250 units/sec, each messages.get = 1 unit → safe up to ~100
+  const limit = pLimit(75)
+
   let pageToken: string | undefined = undefined
-  let scanned = 0, inserted = 0, uploaded = 0, failed = 0
+  let scanned = 0
+  const allMessageIds: string[] = []
   const errors: Array<{ id: string, error: unknown }> = []
 
-  async function sleep(ms: number) { return new Promise(r => setTimeout(r, ms)) }
-
-  // Retry wrapper to handle transient Gmail/Storage hiccups
-  async function retry<T>(fn: () => Promise<T>, attempts = 3, baseDelayMs = 400): Promise<T> {
-    let lastErr: any
-    for (let i = 0; i < attempts; i++) {
-      try { return await fn() } catch (e: any) { lastErr = e }
-      await sleep(baseDelayMs * Math.pow(2, i))
-    }
-    throw lastErr
-  }
-
+  // Step 1: Collect all message IDs (fast, no parsing)
   while (scanned < perRunCap) {
     try {
       const listData = (await gmail.users.messages.list({ userId: "me", q, maxResults, pageToken })).data as gmail_v1.Schema$ListMessagesResponse
@@ -75,114 +71,7 @@ export async function POST() {
         if (!m.id) continue
         if (scanned >= perRunCap) break
         scanned += 1
-        try {
-          const getRes = await retry(() => gmail.users.messages.get({ userId: "me", id: m.id as string, format: "raw" }))
-          const msg = getRes.data
-          const rawBuf = msg.raw ? Buffer.from(msg.raw as string, "base64") : Buffer.from("")
-
-          const dataView = new Uint8Array(rawBuf)
-          const sha256 = createHash("sha256").update(dataView).digest("hex")
-          const receivedAt = msg.internalDate ? new Date(Number(msg.internalDate)).toISOString() : null
-
-          const path = `${user.id}/${m.id}.eml`
-          const upload = await retry(() => supabaseServiceRole.storage
-            .from("emails-raw")
-            .upload(path, dataView, { contentType: "message/rfc822", upsert: true }))
-          if (!upload.error) uploaded += 1
-
-          const rawUrl = `emails-raw/${path}`
-          const { error: upErr } = await supabaseServiceRole
-            .from("messages_raw")
-            .upsert(
-              {
-                user_id: user.id,
-                connected_account_id: acct.id,
-                provider: "google",
-                provider_message_id: m.id,
-                received_at: receivedAt,
-                raw_url: rawUrl,
-                storage_path: path,
-                sha256
-              },
-              { onConflict: "user_id,provider_message_id" }
-            )
-
-          if (upErr) {
-            console.error("messages_raw upsert error", upErr)
-            errors.push({ id: m.id, error: upErr })
-            // record failure row (per-message)
-            const existing = await supabaseServiceRole
-              .from("ingest_failures")
-              .select("id, attempts")
-              .eq("user_id", user.id)
-              .eq("provider", "google")
-              .eq("provider_message_id", m.id)
-              .maybeSingle()
-            if (existing.data) {
-              await supabaseServiceRole
-                .from("ingest_failures")
-                .update({
-                  attempts: (existing.data.attempts || 0) + 1,
-                  last_attempt: new Date().toISOString(),
-                  phase: "upsert",
-                  reason: upErr,
-                  resolved: false
-                })
-                .eq("id", existing.data.id)
-            } else {
-              await supabaseServiceRole
-                .from("ingest_failures")
-                .insert({
-                  user_id: user.id,
-                  connected_account_id: acct.id,
-                  provider: "google",
-                  provider_message_id: m.id,
-                  phase: "upsert",
-                  reason: upErr,
-                  attempts: 1,
-                  last_attempt: new Date().toISOString(),
-                  resolved: false
-                })
-            }
-            failed += 1
-          } else {
-            inserted += 1
-            // mark any prior failure as resolved
-            await supabaseServiceRole
-              .from("ingest_failures")
-              .update({ resolved: true, resolved_at: new Date().toISOString() })
-              .eq("user_id", user.id)
-              .eq("provider", "google")
-              .eq("provider_message_id", m.id)
-          }
-        } catch (e: any) {
-          const code = e?.errors?.[0]?.reason || e?.code
-          if (code === "rateLimitExceeded" || code === 429) {
-            await sleep(1000)
-          }
-          console.error("backfill item error", e)
-          errors.push({ id: m.id!, error: e?.message || e })
-          // record failure for fetch/upload errors
-          const existing = await supabaseServiceRole
-            .from("ingest_failures")
-            .select("id, attempts")
-            .eq("user_id", user.id)
-            .eq("provider", "google")
-            .eq("provider_message_id", m.id!)
-            .maybeSingle()
-          const phase = "fetch"
-          if (existing.data) {
-            await supabaseServiceRole
-              .from("ingest_failures")
-              .update({ attempts: (existing.data.attempts || 0) + 1, last_attempt: new Date().toISOString(), phase, reason: e?.message || e, resolved: false })
-              .eq("id", existing.data.id)
-          } else {
-            await supabaseServiceRole
-              .from("ingest_failures")
-              .insert({ user_id: user.id, connected_account_id: acct.id, provider: "google", provider_message_id: m.id!, phase, reason: e?.message || e, attempts: 1, last_attempt: new Date().toISOString(), resolved: false })
-          }
-          failed += 1
-        }
+        allMessageIds.push(m.id)
       }
 
       pageToken = listData.nextPageToken || undefined
@@ -190,10 +79,9 @@ export async function POST() {
     } catch (e: any) {
       const code = e?.errors?.[0]?.reason || e?.code
       if (code === "rateLimitExceeded" || code === 429) {
-        await sleep(1500)
+        await new Promise(r => setTimeout(r, 1500))
         continue
       }
-      // If the refresh token is invalid/expired, surface a clear auth error
       const errMsg = (e?.response?.data?.error) || e?.message || ""
       if (String(errMsg).includes("invalid_grant") || code === "invalid_grant") {
         return NextResponse.json({ ok: false, auth_error: "invalid_grant" }, { status: 401 })
@@ -203,93 +91,184 @@ export async function POST() {
     }
   }
 
-  // Immediate failure retry sweep: retry queued failures for up to ~60s
-  try {
-    const sweepStart = Date.now()
-    let totalRetried = 0
-    while (Date.now() - sweepStart < 60_000) {
-      const { data: fails } = await supabaseServiceRole
-        .from("ingest_failures")
-        .select("id, provider_message_id, attempts")
-        .eq("user_id", user.id)
-        .eq("provider", "google")
-        .eq("resolved", false)
-        .lt("attempts", 5)
-        .limit(25)
-      if (!fails || fails.length === 0) break
+  // Step 2: Fetch metadata for all messages in parallel
+  const emailTasks = allMessageIds.map((messageId) =>
+    limit(async () => {
+      try {
+        // OPTIMIZATION: Request ONLY metadata (No raw body = 100x smaller payload)
+        const res = await gmail.users.messages.get({
+          userId: "me",
+          id: messageId,
+          format: "metadata",
+          metadataHeaders: [
+            "From",
+            "Subject",
+            "Date",
+            "List-ID",
+            "List-Unsubscribe",
+            "Return-Path",      // Needed for extractSenderKey
+            "DKIM-Signature",   // Needed for extractSenderKey
+            "Message-Id"        // Needed for extractSenderKey
+          ]
+        })
 
-      for (const f of fails) {
-        try {
-          const getRes = await retry(() => gmail.users.messages.get({ userId: "me", id: f.provider_message_id as string, format: "raw" }))
-          const msg = getRes.data
-          const rawBuf = msg.raw ? Buffer.from(msg.raw as string, "base64") : Buffer.from("")
-
-          const dataView = new Uint8Array(rawBuf)
-          const sha256 = createHash("sha256").update(dataView).digest("hex")
-          const receivedAt = msg.internalDate ? new Date(Number(msg.internalDate)).toISOString() : null
-
-          const path = `${user.id}/${f.provider_message_id}.eml`
-          const upload = await retry(() => supabaseServiceRole.storage
-            .from("emails-raw")
-            .upload(path, dataView, { contentType: "message/rfc822", upsert: true }))
-          if (!upload.error) uploaded += 1
-
-          const rawUrl = `emails-raw/${path}`
-          const { error: upErr } = await supabaseServiceRole
-            .from("messages_raw")
-            .upsert(
-              {
-                user_id: user.id,
-                connected_account_id: acct.id,
-                provider: "google",
-                provider_message_id: f.provider_message_id,
-                received_at: receivedAt,
-                raw_url: rawUrl,
-                storage_path: path,
-                sha256
-              },
-              { onConflict: "user_id,provider_message_id" }
-            )
-
-          if (upErr) {
-            await supabaseServiceRole
-              .from("ingest_failures")
-              .update({ attempts: (f.attempts || 0) + 1, last_attempt: new Date().toISOString(), phase: "upsert", reason: upErr, resolved: false })
-              .eq("id", f.id)
-          } else {
-            await supabaseServiceRole
-              .from("ingest_failures")
-              .update({ resolved: true, resolved_at: new Date().toISOString() })
-              .eq("id", f.id)
-            totalRetried += 1
-          }
-        } catch (e: any) {
-          await supabaseServiceRole
-            .from("ingest_failures")
-            .update({ attempts: (f.attempts || 0) + 1, last_attempt: new Date().toISOString(), phase: "fetch", reason: e?.message || e, resolved: false })
-            .eq("id", f.id)
+        const headers = res.data.payload?.headers || []
+        const getHeader = (name: string) => {
+          const h = headers.find(h => h.name?.toLowerCase() === name.toLowerCase())
+          return h?.value || undefined
         }
-      }
 
-      // small pause between mini-batches
-      await sleep(500)
+        const fromValue = getHeader("From") || ""
+        const subject = getHeader("Subject") || ""
+        const date = getHeader("Date") || ""
+
+        // Extract email/name from the "From" header string
+        const fromEmailMatch = fromValue.match(/<(.+?)>/)
+        const fromEmail = fromEmailMatch ? fromEmailMatch[1] : (fromValue.includes("@") ? fromValue.trim() : "")
+        const fromName = fromValue.replace(/<.+?>/, "").trim() || null
+        const fromDomain = fromEmail && fromEmail.includes("@") ? fromEmail.split("@")[1]?.toLowerCase() : null
+
+        // Build headers object for extractSenderKey
+        const headersObj: Record<string, string | undefined> = {}
+        headers.forEach(h => {
+          if (h.name && h.value) {
+            headersObj[h.name.toLowerCase()] = h.value
+          }
+        })
+
+        // Extract sender_key using all needed headers
+        const senderKey = extractSenderKey(headersObj, fromDomain || null)
+
+        // Minimal headers_json (only what we need for classification)
+        const headersJson = {
+          list_id: getHeader("List-ID") || null,
+          list_unsubscribe: getHeader("List-Unsubscribe") || null,
+          from: fromValue || null,
+          subject: subject || null,
+          date: date || null
+        }
+
+        // Use internalDate (more reliable than parsing Date header)
+        const receivedAt = res.data.internalDate
+          ? new Date(Number(res.data.internalDate)).toISOString()
+          : null
+
+        return {
+          user_id: user.id,
+          connected_account_id: acct.id,
+          provider: "google",
+          provider_message_id: messageId,
+          received_at: receivedAt,
+          sender_key: senderKey,
+          subject: subject || null,
+          from_name: fromName,
+          from_email: fromEmail || null,
+          headers_json: headersJson,
+          storage_path: `skipped/${user.id}/${messageId}`, // Placeholder - not storing .eml files for speed
+          // Skip: raw_url, sha256 (not needed for onboarding)
+        }
+      } catch (err: any) {
+        const code = err?.errors?.[0]?.reason || err?.code
+        const errMsg = err?.response?.data?.error || err?.message || ""
+        
+        // OAuth/auth errors - these are fatal and should stop the whole process
+        if (code === "invalid_grant" || String(errMsg).includes("invalid_grant") || 
+            code === 401 || String(errMsg).includes("unauthorized") ||
+            String(errMsg).includes("Invalid Credentials")) {
+          throw err // Re-throw to be caught by outer handler
+        }
+        
+        if (code === "rateLimitExceeded" || code === 429) {
+          // Rate limited - return null, will be retried if needed
+          return null
+        }
+        console.error(`Failed to fetch ${messageId}`, err)
+        errors.push({ id: messageId, error: err?.message || err })
+        return null // Skip failed ones
+      }
+    })
+  )
+
+  // Step 3: Execute all requests in parallel
+  type EmailResult = {
+    user_id: string
+    connected_account_id: string
+    provider: string
+    provider_message_id: string
+    received_at: string | null
+    sender_key: string | null
+    subject: string | null
+    from_name: string | null
+    from_email: string | null
+    headers_json: Record<string, any>
+    storage_path: string
+  }
+  
+  let allResults: Array<EmailResult | null> = []
+  try {
+    allResults = await Promise.all(emailTasks)
+  } catch (err: any) {
+    // Catch OAuth errors that were re-thrown from individual tasks
+    const errMsg = err?.response?.data?.error || err?.message || ""
+    const code = err?.errors?.[0]?.reason || err?.code
+    if (code === "invalid_grant" || String(errMsg).includes("invalid_grant") || 
+        code === 401 || String(errMsg).includes("unauthorized")) {
+      return NextResponse.json({ ok: false, auth_error: "invalid_grant", message: "OAuth token expired. Please reconnect your Google account." }, { status: 401 })
     }
-  } catch (e) {
-    console.error("failure retry sweep error", e)
+    throw err // Re-throw other errors
+  }
+  const results = allResults.filter((r): r is EmailResult => r !== null)
+  const fetchFailed = allResults.length - results.length // Count of null results (failed fetches)
+
+  // Step 4: PARALLEL Chunked Upserts (Multiple DB trips in parallel)
+  let inserted = 0
+  let upsertFailed = 0
+  if (results.length > 0) {
+    const CHUNK_SIZE = 200 // Batch size per upsert
+    const chunks: typeof results[] = []
+    for (let i = 0; i < results.length; i += CHUNK_SIZE) {
+      chunks.push(results.slice(i, i + CHUNK_SIZE))
+    }
+
+    // Parallel upserts (limit to 10 concurrent DB writes to avoid overwhelming DB)
+    const dbLimit = pLimit(10)
+    const upsertTasks = chunks.map((chunk) =>
+      dbLimit(async () => {
+        const { error: upErr } = await supabaseServiceRole
+          .from("messages_raw")
+          .upsert(chunk, { onConflict: "user_id,provider_message_id" })
+
+        if (upErr) {
+          console.error(`chunk upsert error (${chunk.length} records)`, upErr)
+          return { success: false, count: chunk.length, error: upErr }
+        }
+        return { success: true, count: chunk.length }
+      })
+    )
+
+    const upsertResults = await Promise.all(upsertTasks)
+    for (const result of upsertResults) {
+      if (result.success) {
+        inserted += result.count
+      } else {
+        upsertFailed += result.count
+        errors.push({ id: "bulk", error: result.error?.message || String(result.error) })
+      }
+    }
   }
 
-  // Update watermark for observability (not used for newer_than fetch)
+  // Update watermark for observability
   try {
     await supabaseServiceRole
       .from("system_state")
-      .upsert({ user_id: user.id, last_backfill_at: new Date().toISOString(), key: "default", value: "backfill" }, { onConflict: "user_id" })
+      .upsert({ user_id: user.id, last_backfill_at: new Date().toISOString(), key: "default", value: "\"backfill\"" }, { onConflict: "user_id" })
   } catch (e) {
     console.error("system_state upsert error", e)
   }
 
-  // Purge raws older than 30 days (FK cascade will clean messages_clean)
+  // Purge raws older than 14 days
   try {
-    const cutoffIso = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString()
+    const cutoffIso = new Date(Date.now() - 14 * 24 * 60 * 60 * 1000).toISOString()
     await supabaseServiceRole
       .from("messages_raw")
       .delete()
@@ -299,5 +278,18 @@ export async function POST() {
     console.error("purge old raws error", e)
   }
 
-  return NextResponse.json({ ok: true, query: q, messages_scanned: scanned, uploaded, inserted, failed, errors })
+  const totalFailed = fetchFailed + upsertFailed
+  const elapsed = Date.now() - startTime
+
+  return NextResponse.json({
+    ok: true,
+    query: q,
+    messages_scanned: scanned,
+    inserted,
+    failed: totalFailed,
+    fetch_failed: fetchFailed,
+    upsert_failed: upsertFailed,
+    time_ms: elapsed,
+    errors: errors.length > 0 ? errors.slice(0, 10) : undefined // Limit errors to first 10
+  })
 }

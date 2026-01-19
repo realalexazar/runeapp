@@ -12,11 +12,15 @@ export default function ConnectGmailCard({ isConnected }: { isConnected: boolean
       setLoading(true)
       setError(null)
       const res = await fetch("/api/connect/gmail/start")
-      if (!res.ok) throw new Error("Failed to start OAuth")
-      const { url } = await res.json()
+      const data = await res.json()
+      if (!res.ok) {
+        throw new Error(data.message || data.error || "Failed to start OAuth")
+      }
+      const { url } = data
       if (!url) throw new Error("Missing redirect URL")
       location.assign(url)
     } catch (e: any) {
+      console.error("OAuth start error:", e)
       setError(e?.message ?? "Something went wrong")
       setLoading(false)
     }
