@@ -3,11 +3,17 @@
 import { useEffect, useRef, useState } from "react"
 import Link from "next/link"
 import { Button } from "@/components/ui/button"
+import { getSupabaseBrowserClient } from "@/lib/supabase/client"
+import AuthDialog from "@/components/AuthDialog"
+import type { User } from "@supabase/supabase-js"
 
 export default function SmartHeader() {
   const [active, setActive] = useState(false)
   const hideTimer = useRef<number | null>(null)
   const isHovering = useRef(false)
+  const [user, setUser] = useState<User | null>(null)
+  const [signupOpen, setSignupOpen] = useState(false)
+  const [loginOpen, setLoginOpen] = useState(false)
 
   function scheduleHide(delay = 5000) {
     if (hideTimer.current) window.clearTimeout(hideTimer.current)
@@ -27,6 +33,31 @@ export default function SmartHeader() {
       window.removeEventListener("scroll", onScroll)
     }
   }, [active])
+
+  // Check auth state
+  useEffect(() => {
+    const supabase = getSupabaseBrowserClient()
+    
+    // Get initial session
+    supabase.auth.getUser().then(({ data: { user } }) => {
+      setUser(user)
+    })
+
+    // Listen for auth changes
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+      setUser(session?.user ?? null)
+    })
+
+    return () => {
+      subscription.unsubscribe()
+    }
+  }, [])
+
+  async function handleSignOut() {
+    const supabase = getSupabaseBrowserClient()
+    await supabase.auth.signOut()
+    window.location.href = "/"
+  }
 
   return (
     <header
@@ -48,11 +79,35 @@ export default function SmartHeader() {
         }}
       >
         <Link href="/" className="font-serif text-xl text-white">Rune</Link>
-        <div className="flex items-center gap-6">
-          <Link href="/dashboard">
-            <Button className="bg-white/15 text-white hover:bg-white/25">Dashboard</Button>
-          </Link>
+        <div className="flex items-center gap-4">
+          {user ? (
+            <>
+              <Link href="/dashboard">
+                <Button className="bg-white/15 text-white hover:bg-white/25">Dashboard</Button>
+              </Link>
+              <Button 
+                variant="outline" 
+                className="bg-white/5 border-white/20 text-white hover:bg-white/10"
+                onClick={handleSignOut}
+              >
+                Sign Out
+              </Button>
+            </>
+          ) : (
+            <>
+              <Button 
+                variant="outline" 
+                className="bg-white/5 border-white/20 text-white hover:bg-white/10"
+                onClick={() => setLoginOpen(true)}
+              >
+                Login
+              </Button>
+              <Button onClick={() => setSignupOpen(true)}>Sign Up</Button>
+            </>
+          )}
         </div>
+        <AuthDialog open={signupOpen} onOpenChange={setSignupOpen} initialMode="signup" />
+        <AuthDialog open={loginOpen} onOpenChange={setLoginOpen} initialMode="login" />
       </nav>
     </header>
   )

@@ -18,7 +18,13 @@ type ApiResponse = {
   message?: string
 }
 
-export default function NewsletterSelectionCard() {
+type NewsletterSelectionCardProps = {
+  onFinalized?: () => void
+}
+
+export default function NewsletterSelectionCard({ onFinalized }: NewsletterSelectionCardProps = {}) {
+  console.log("NewsletterSelectionCard rendered, onFinalized:", typeof onFinalized)
+  
   const [senders, setSenders] = useState<Sender[]>([])
   const [localSelections, setLocalSelections] = useState<Map<string, boolean>>(new Map())
   const [loading, setLoading] = useState(true)
@@ -39,6 +45,14 @@ export default function NewsletterSelectionCard() {
       const res = await fetch("/api/onboard/classified-senders", {
         credentials: "include"
       })
+      
+      // Handle 401 Unauthorized (session expired)
+      if (res.status === 401) {
+        setError("Your session has expired. Please refresh the page or sign in again.")
+        setLoading(false)
+        return
+      }
+      
       const data: ApiResponse = await res.json()
       
       if (!data.ok) {
@@ -73,6 +87,9 @@ export default function NewsletterSelectionCard() {
   }, [])
 
   const handleFinalize = useCallback(async () => {
+    console.log("handleFinalize called!")
+    console.log("onFinalized prop:", typeof onFinalized, onFinalized)
+    
     setSaving(true)
     setError(null)
     setSuccess(null)
@@ -100,15 +117,24 @@ export default function NewsletterSelectionCard() {
 
       setSuccess(data.message || `Successfully saved ${data.saved} selection(s).`)
       
-      // Refresh senders to get updated state
-      await fetchSenders()
+      // Call callback to advance to next step BEFORE refreshing
+      // This ensures the step transition happens immediately
+      if (onFinalized) {
+        console.log("Calling onFinalized callback")
+        onFinalized()
+      } else {
+        console.warn("onFinalized callback is not defined")
+      }
+      
+      // Refresh senders to get updated state (non-blocking)
+      fetchSenders().catch(console.error)
     } catch (e: any) {
       console.error("Error finalizing selections:", e)
       setError(e?.message || "Failed to save selections")
     } finally {
       setSaving(false)
     }
-  }, [localSelections, fetchSenders])
+  }, [localSelections, fetchSenders, onFinalized])
 
   // Group senders by status
   const yesSenders = senders.filter(s => s.status === "Yes")

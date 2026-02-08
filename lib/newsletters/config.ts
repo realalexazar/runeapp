@@ -14,7 +14,8 @@ export const ESP_REGISTRABLE_BLOCKLIST: string[] = [
   "klaviyo.com",
   "sendinblue.com",
   "constantcontact.com",
-  "campaignmonitor.com"
+  "campaignmonitor.com",
+  "salesforce.com" // Marketing Cloud / Pardot ESP
 ]
 
 export function isEspRegistrableDomain(registrable: string | null | undefined): boolean {
