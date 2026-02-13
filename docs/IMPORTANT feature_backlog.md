@@ -50,6 +50,16 @@
   - Smooth animations, native feel
   - Manage 11+ newsletters fluidly
   - **Documentation:** `docs/in_app_experience_vision.md`
+- **[IDEA]** **Remove Newsletter from Digest** - One-click removal for noisy newsletters
+- **[IDEA]** **Digest Quality Report** - Show quality metrics after each digest
+- **[IDEA]** **Newsletter Management Dashboard** - Quality indicators, one-click removal, re-add later
+- **[IDEA]** **Summary Ranking & Feedback** - Users can rank/rate summaries to improve quality
+  - "Was this summary helpful?" (👍/👎) buttons on each digest item
+  - Optional detailed feedback: "What could be improved?"
+  - Track satisfaction scores per newsletter and summary style
+  - Use feedback to iterate on prompts and preprocessing
+  - Auto-remove low-rated newsletters from digest
+  - Show satisfaction metrics in newsletter management dashboard
 
 ---
 
@@ -74,18 +84,25 @@
 
 ## PERIPHERY FEATURES
 
-### Web Topic Scraping
+### Web Topic Scraping (Beachhead Feature Expansion)
 - **[IDEA]** **Topic Management** - Users can add topics for web scraping
 - **[IDEA]** **RSS Feed Integration** - Aggregate content from RSS feeds
 - **[IDEA]** **News API Integration** - Pull content from news APIs
 - **[IDEA]** **Custom Scraping** - Scrape specific websites
 - **[IDEA]** **Topic Content in Digests** - Include web content in digests
+- **[IDEA]** **Daily Learning on Topics** - User selects topics → Rune aggregates content daily
+- **[IDEA]** **Perplexity-Style Web Querying** - User queries → Real-time web search → Summarized results
+- **Note:** Email summaries are the beachhead feature. Web scraping is Phase 2 expansion.
 
 ### AI Enhancements
 - **[IDEA]** **AI Synthesis Toggle** - Optional AI analysis per newsletter
 - **[IDEA]** **Key Insights Extraction** - Extract key quotes/insights
 - **[IDEA]** **Native LLM Querying** - Chat interface to query digests
 - **[IDEA]** **AI-Suggested Rune Names** - Generate names after digest config based on selected newsletters/interests (UX gimmick)
+- **[IDEA]** **Feedback-Driven Prompt Iteration** - Use summary rankings to improve LLM prompts
+  - Analyze low-rated summaries to identify patterns
+  - A/B test prompt variations based on feedback
+  - Continuously refine prompts for better summaries
 
 ### Advanced Features
 - **[IDEA]** **Rich HTML Formatting** - Advanced email templates
@@ -225,10 +242,12 @@
 4. Basic App Interface (Dashboard, Digest View)
 
 ### Phase 2: Enhancement (Weeks 5-8)
-1. Web Topic Scraping
-2. AI Synthesis Toggle
-3. Advanced Formatting
-4. Mobile App (React Native)
+1. Summary Ranking & Feedback System
+2. User Newsletter Recommendations
+3. Web Topic Scraping
+4. AI Synthesis Toggle
+5. Advanced Formatting
+6. Mobile App (React Native)
 
 ### Phase 3: Scale (Weeks 9+)
 1. Analytics & Monitoring
@@ -295,6 +314,7 @@
 - **Complete Roadmap:** `docs/complete_roadmap_10_modules.md`
 - **In-App Experience Vision:** `docs/in_app_experience_vision.md`
 - **LLM Email Structure Prompt:** `docs/llm_email_structure_prompt.md`
+- **Product Strategy & Email Handling:** `docs/product_strategy_email_handling.md` ⭐ **NEW**
 
 ---
 

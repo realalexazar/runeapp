@@ -398,18 +398,17 @@ For opportunity-based emails (internships, programs, offers), prioritize the act
       tone: "Concise and fact-dense"
     },
     "deep-read": {
-      instruction: `Provide a detailed 4-6 sentence summary with context, insights, and important details.
+      instruction: `Provide a detailed summary with context, insights, and important details. This summary should be as long as needed to constitute a "deep read" of the source material (a few setences to paragraphs as necessary).
 
 - Synthesize information to highlight key takeaways and why they matter.
 - Add background context, implications, or connections that help readers understand the significance.
-- For newsletters with multiple articles, summarize the 2-4 most important sections.
 - Make dense or technical content more accessible.`,
       tone: "Comprehensive and analytical"
     },
     "reference-mode": {
       instruction: `Provide a structured summary with main topics and key points.
 
-- Format: Start with main topic, then list key points.
+- Format: Start with main topics, the list key points for each topic.
 - Synthesize information to highlight what matters most.
 - Add context or implications where helpful.
 - For multi-article newsletters, organize by topic.
