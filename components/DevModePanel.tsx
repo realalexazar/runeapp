@@ -113,6 +113,44 @@ export default function DevModePanel() {
     }
   }
 
+  const handleGenerateDailyNews = async (regenerate: boolean = false) => {
+    setLoading(regenerate ? "news-regenerate" : "news")
+    setError(null)
+    try {
+      const res = await fetch("/api/digest/generate-daily-news-topics", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ regenerate })
+      })
+      const data = await res.json()
+      if (!data.ok) throw new Error(data.error || "Failed to generate daily news topics")
+      setResults({ type: regenerate ? "daily-news-regenerate" : "daily-news", data })
+    } catch (e: any) {
+      setError(e?.message || "Failed to generate daily news topics")
+    } finally {
+      setLoading(null)
+    }
+  }
+
+  const handleGenerateDailyLessons = async (regenerate: boolean = false) => {
+    setLoading(regenerate ? "lessons-regenerate" : "lessons")
+    setError(null)
+    try {
+      const res = await fetch("/api/digest/generate-daily-lessons", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ regenerate })
+      })
+      const data = await res.json()
+      if (!data.ok) throw new Error(data.error || "Failed to generate daily lessons")
+      setResults({ type: regenerate ? "daily-lessons-regenerate" : "daily-lessons", data })
+    } catch (e: any) {
+      setError(e?.message || "Failed to generate daily lessons")
+    } finally {
+      setLoading(null)
+    }
+  }
+
   const handleSendDigest = async () => {
     setLoading("send")
     setError(null)
@@ -218,6 +256,42 @@ export default function DevModePanel() {
           </button>
         </div>
 
+        <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+          <div className="flex gap-2">
+            <button
+              onClick={() => handleGenerateDailyNews(false)}
+              disabled={loading !== null || !verificationStatus?.ready_for_digest}
+              className="flex-[2] px-4 py-2 rounded-lg bg-white/10 hover:bg-white/15 disabled:opacity-50 disabled:cursor-not-allowed transition-colors text-white text-sm font-medium text-left"
+            >
+              {loading === "news" ? "Generating..." : "3c. Generate Daily News Topics"}
+            </button>
+            <button
+              onClick={() => handleGenerateDailyNews(true)}
+              disabled={loading !== null || !verificationStatus?.ready_for_digest}
+              className="flex-1 px-4 py-2 rounded-lg bg-white/10 hover:bg-white/15 disabled:opacity-50 disabled:cursor-not-allowed transition-colors text-white text-sm font-medium text-left"
+            >
+              {loading === "news-regenerate" ? "Regenerating..." : "Regen"}
+            </button>
+          </div>
+
+          <div className="flex gap-2">
+            <button
+              onClick={() => handleGenerateDailyLessons(false)}
+              disabled={loading !== null || !verificationStatus?.ready_for_digest}
+              className="flex-[2] px-4 py-2 rounded-lg bg-white/10 hover:bg-white/15 disabled:opacity-50 disabled:cursor-not-allowed transition-colors text-white text-sm font-medium text-left"
+            >
+              {loading === "lessons" ? "Generating..." : "3d. Generate Daily Lessons"}
+            </button>
+            <button
+              onClick={() => handleGenerateDailyLessons(true)}
+              disabled={loading !== null || !verificationStatus?.ready_for_digest}
+              className="flex-1 px-4 py-2 rounded-lg bg-white/10 hover:bg-white/15 disabled:opacity-50 disabled:cursor-not-allowed transition-colors text-white text-sm font-medium text-left"
+            >
+              {loading === "lessons-regenerate" ? "Regenerating..." : "Regen"}
+            </button>
+          </div>
+        </div>
+
         {/* Style Selection Modal */}
         <Dialog.Root open={showStyleModal} onOpenChange={setShowStyleModal}>
           <Dialog.Portal>
@@ -286,7 +360,7 @@ export default function DevModePanel() {
           disabled={loading !== null || !verificationStatus?.ready_for_digest}
           className="w-full px-4 py-2 rounded-lg bg-white/10 hover:bg-white/15 disabled:opacity-50 disabled:cursor-not-allowed transition-colors text-white text-sm font-medium text-left"
         >
-          {loading === "format" ? "Formatting..." : "4. Format Digest (Style-based)"}
+          {loading === "format" ? "Formatting..." : "4. Format Unified Digest"}
         </button>
 
         <button
@@ -294,7 +368,7 @@ export default function DevModePanel() {
           disabled={loading !== null || !verificationStatus?.ready_for_digest}
           className="w-full px-4 py-2 rounded-lg bg-white/10 hover:bg-white/15 disabled:opacity-50 disabled:cursor-not-allowed transition-colors text-white text-sm font-medium text-left"
         >
-          {loading === "send" ? "Sending..." : "5. Send to Inbox (Resend)"}
+          {loading === "send" ? "Sending..." : "5. Send Unified Digest to Inbox"}
         </button>
       </div>
 
@@ -305,7 +379,7 @@ export default function DevModePanel() {
           disabled={loading !== null || !verificationStatus?.ready_for_digest}
           className="w-full px-4 py-2 rounded-lg bg-yellow-500/20 hover:bg-yellow-500/30 disabled:opacity-50 disabled:cursor-not-allowed transition-colors text-yellow-200 font-medium"
         >
-          {loading === "full" ? "Generating Full Digest..." : "🚀 Generate Full Digest (All Steps)"}
+          {loading === "full" ? "Generating Full Digest..." : "🚀 Generate + Format + Send Full Digest"}
         </button>
       </div>
 

@@ -2,6 +2,17 @@ import { NextResponse } from "next/server"
 import { getSupabaseServerClient } from "@/lib/supabase/server"
 import { supabaseServiceRole } from "@/lib/supabase/service"
 
+function isTransientNetworkError(err: any): boolean {
+  const code = String(err?.cause?.code || err?.code || "")
+  const message = String(err?.message || err || "").toLowerCase()
+  return (
+    code === "UND_ERR_CONNECT_TIMEOUT" ||
+    message.includes("connect timeout") ||
+    message.includes("fetch failed") ||
+    message.includes("network")
+  )
+}
+
 /**
  * GET /api/onboard/classified-senders
  * 
@@ -10,13 +21,25 @@ import { supabaseServiceRole } from "@/lib/supabase/service"
  */
 export async function GET() {
   const supabase = await getSupabaseServerClient()
-  const { data: { user } } = await supabase.auth.getUser()
-  
-  if (!user) {
-    return NextResponse.json({ ok: false, error: "Unauthorized" }, { status: 401 })
-  }
 
   try {
+    const authResult = await supabase.auth.getUser()
+    if (authResult.error) {
+      const status = isTransientNetworkError(authResult.error) ? 503 : 500
+      return NextResponse.json({
+        ok: false,
+        retryable: isTransientNetworkError(authResult.error),
+        error: isTransientNetworkError(authResult.error)
+          ? "Temporary auth connectivity issue. Please retry."
+          : "Failed to validate session."
+      }, { status })
+    }
+
+    const user = authResult.data.user
+    if (!user) {
+      return NextResponse.json({ ok: false, error: "Unauthorized" }, { status: 401 })
+    }
+
     // Step 1: Get all classified senders from digest_candidates
     const { data: candidates, error: candidatesErr } = await supabaseServiceRole
       .from("digest_candidates")

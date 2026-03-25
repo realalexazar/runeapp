@@ -3,6 +3,7 @@ import { getSupabaseServerClient } from "@/lib/supabase/server"
 import { supabaseServiceRole } from "@/lib/supabase/service"
 import { google } from "googleapis"
 import { decrypt } from "@/lib/crypto"
+import { getLessonStateFromMapping } from "@/lib/digest/content-modules"
 
 /**
  * GET /api/digest/verify
@@ -28,6 +29,28 @@ export async function GET() {
       newsletter_count: number
       has_digest_config: boolean
       digest_config: any | null
+      module_flags: {
+        enable_newsletter_digest: boolean
+        enable_daily_news_topics: boolean
+        enable_daily_lessons: boolean
+      }
+      module_defaults: {
+        news_topic_timeframe: string
+        lesson_frequency: string
+        lesson_curriculum_days: number
+      }
+      active_news_topics_count: number
+      active_lesson_topics_count: number
+      active_news_topic: string | null
+      active_lesson_topic: string | null
+      active_news_empty_streak: number
+      active_lesson_state: {
+        status: "active" | "paused" | "completed"
+        next_day: number
+        last_generated_date?: string | null
+        paused_at?: string | null
+        completed_at?: string | null
+      } | null
       has_messages_raw: boolean
       messages_count: number
       ready_for_digest: boolean
@@ -41,6 +64,22 @@ export async function GET() {
       newsletter_count: 0,
       has_digest_config: false,
       digest_config: null,
+      module_flags: {
+        enable_newsletter_digest: true,
+        enable_daily_news_topics: false,
+        enable_daily_lessons: false
+      },
+      module_defaults: {
+        news_topic_timeframe: "24h",
+        lesson_frequency: "daily",
+        lesson_curriculum_days: 10
+      },
+      active_news_topics_count: 0,
+      active_lesson_topics_count: 0,
+      active_news_topic: null,
+      active_lesson_topic: null,
+      active_news_empty_streak: 0,
+      active_lesson_state: null,
       has_messages_raw: false,
       messages_count: 0,
       ready_for_digest: false,
@@ -113,6 +152,59 @@ export async function GET() {
     
     verification.has_digest_config = !!config
     verification.digest_config = config
+    verification.module_flags = {
+      ...verification.module_flags,
+      ...(config?.module_flags || {})
+    }
+    verification.module_defaults = {
+      ...verification.module_defaults,
+      ...(config?.module_defaults || {})
+    }
+
+    // 3b. Active news topic(s)
+    const { data: activeNewsTopics, count: activeNewsTopicsCount } = await supabaseServiceRole
+      .from("user_news_topics")
+      .select("id, topic_text", { count: "exact" })
+      .eq("user_id", user.id)
+      .eq("active", true)
+      .order("created_at", { ascending: false })
+      .limit(1)
+
+    verification.active_news_topics_count = activeNewsTopicsCount || 0
+    verification.active_news_topic = activeNewsTopics?.[0]?.topic_text || null
+
+    if (activeNewsTopics?.[0]?.id) {
+      const { data: recentNewsItems } = await supabaseServiceRole
+        .from("generated_content_items")
+        .select("metadata, generated_date")
+        .eq("user_id", user.id)
+        .eq("module", "news_topics")
+        .eq("topic_id", activeNewsTopics[0].id)
+        .order("generated_date", { ascending: false })
+        .limit(7)
+
+      let streak = 0
+      for (const row of recentNewsItems || []) {
+        if (row?.metadata?.empty_state === true) streak += 1
+        else break
+      }
+      verification.active_news_empty_streak = streak
+    }
+
+    // 3c. Active lesson topic(s)
+    const { data: activeLessonTopics, count: activeLessonTopicsCount } = await supabaseServiceRole
+      .from("user_lesson_topics")
+      .select("topic_text, topic_mapping_json", { count: "exact" })
+      .eq("user_id", user.id)
+      .eq("active", true)
+      .order("created_at", { ascending: false })
+      .limit(1)
+
+    verification.active_lesson_topics_count = activeLessonTopicsCount || 0
+    verification.active_lesson_topic = activeLessonTopics?.[0]?.topic_text || null
+    verification.active_lesson_state = activeLessonTopics?.[0]?.topic_mapping_json
+      ? getLessonStateFromMapping(activeLessonTopics[0].topic_mapping_json)
+      : null
 
     // 4. Determine if ready for digest generation
     const missing: string[] = []

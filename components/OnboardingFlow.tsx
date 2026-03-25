@@ -24,10 +24,11 @@ export default function OnboardingFlow({ isConnected }: OnboardingFlowProps) {
   
   const [onboardingStep, setOnboardingStep] = useState<OnboardingStep>(1)
   const [step2Progress, setStep2Progress] = useState<Step2Progress>({
-    cadenceSelected: false,
+    // MVP lock: cadence is fixed to daily, so cadence is always "selected".
+    cadenceSelected: true,
     timeSelected: false
   })
-  const [selectedCadence, setSelectedCadence] = useState<string | null>(null)
+  const [selectedCadence, setSelectedCadence] = useState<string | null>("daily")
   const [selectedTimes, setSelectedTimes] = useState<string[]>([])
   const [selectedTimezone, setSelectedTimezone] = useState<string>("UTC")
 
@@ -68,10 +69,10 @@ export default function OnboardingFlow({ isConnected }: OnboardingFlowProps) {
   const handleBackToStep1 = () => {
     setOnboardingStep(1)
     setStep2Progress({
-      cadenceSelected: false,
+      cadenceSelected: true,
       timeSelected: false
     })
-    setSelectedCadence(null)
+    setSelectedCadence("daily")
     setSelectedTimes([])
   }
 

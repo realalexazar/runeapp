@@ -21,15 +21,26 @@ export default async function DashboardPage() {
     isConnected = !!data && data.status === "connected"
   }
 
-  // Check if user has digest config (post-onboarding state)
+  // Check if user has COMPLETE digest config (post-onboarding state)
   let hasDigestConfig = false
   if (user) {
     const { data } = await supabaseServiceRole
       .from("digest_configs")
-      .select("user_id")
+      .select("user_id, cadence, send_time, timezone, style")
       .eq("user_id", user.id)
       .single()
-    hasDigestConfig = !!data
+
+    const hasRequiredConfig =
+      !!data &&
+      typeof data.cadence === "string" &&
+      Array.isArray(data.send_time) &&
+      data.send_time.length > 0 &&
+      typeof data.timezone === "string" &&
+      data.timezone.length > 0 &&
+      typeof data.style === "string" &&
+      data.style.length > 0
+
+    hasDigestConfig = hasRequiredConfig
   }
 
   return (

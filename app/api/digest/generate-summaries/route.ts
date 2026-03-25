@@ -3,6 +3,7 @@ import { getSupabaseServerClient } from "@/lib/supabase/server"
 import { supabaseServiceRole } from "@/lib/supabase/service"
 import pLimit from "p-limit"
 import { convert } from "html-to-text"
+import { callOpenAIChatCompletion, isTransientNetworkError } from "@/lib/openai/chat"
 
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY
 const BATCH_SIZE = 12 // Conservative batch size (10-15 range)
@@ -39,10 +40,23 @@ const MIN_CONTENT_LENGTH = 100 // Minimum content length before skipping LLM (sp
 export async function POST(req: Request) {
   const startTime = Date.now()
   const supabase = await getSupabaseServerClient()
-  const { data: { user } } = await supabase.auth.getUser()
-  if (!user) return NextResponse.json({ ok: false, error: "Unauthorized" }, { status: 401 })
 
   try {
+    const authResult = await supabase.auth.getUser()
+    if (authResult.error) {
+      const retryable = isTransientNetworkError(authResult.error)
+      return NextResponse.json({
+        ok: false,
+        retryable,
+        error: retryable
+          ? "Temporary auth connectivity issue. Please retry."
+          : "Failed to validate session."
+      }, { status: retryable ? 503 : 500 })
+    }
+
+    const user = authResult.data.user
+    if (!user) return NextResponse.json({ ok: false, error: "Unauthorized" }, { status: 401 })
+
     const body = await req.json().catch(() => ({}))
     const lookbackDays = body.lookback_days ? parseInt(body.lookback_days) : null
     const styleOverride = body.style || null // For dev mode testing
@@ -308,10 +322,14 @@ export async function POST(req: Request) {
 
   } catch (e: any) {
     console.error("Error generating summaries:", e)
+    const retryable = isTransientNetworkError(e)
     return NextResponse.json({
       ok: false,
-      error: String(e.message || e)
-    }, { status: 500 })
+      retryable,
+      error: retryable
+        ? "Temporary network issue while generating summaries. Please retry."
+        : String(e.message || e)
+    }, { status: retryable ? 503 : 500 })
   }
 }
 
@@ -484,27 +502,15 @@ ${itemsText}`
       throw new Error("OpenAI API key not configured")
     }
 
-    const response = await fetch("https://api.openai.com/v1/chat/completions", {
-      method: "POST",
-      headers: {
-        "Authorization": `Bearer ${OPENAI_API_KEY}`,
-        "Content-Type": "application/json"
-      },
-      body: JSON.stringify({
-        model: model, // Use provided model (default: gpt-4o-mini)
-        messages: [
-          { role: "system", content: systemPrompt },
-          { role: "user", content: userPrompt }
-        ],
-        temperature: 0.7,
-        response_format: { type: "json_object" }
-      })
+    const response = await callOpenAIChatCompletion({
+      apiKey: OPENAI_API_KEY,
+      model,
+      temperature: 0.7,
+      messages: [
+        { role: "system", content: systemPrompt },
+        { role: "user", content: userPrompt }
+      ]
     })
-
-    if (!response.ok) {
-      const errorData = await response.json().catch(() => ({}))
-      throw new Error(`OpenAI API error: ${response.status} ${errorData.error?.message || response.statusText}`)
-    }
 
     const data = await response.json()
     responseText = data.choices[0]?.message?.content || "{}"
