@@ -2,8 +2,11 @@ import { NextResponse } from "next/server";
 import { getSupabaseServerClient } from "@/lib/supabase/server";
 import { google } from "googleapis";
 
-export async function GET() {
+export async function GET(request: Request) {
   try {
+    const { searchParams } = new URL(request.url);
+    const redirect = searchParams.get("redirect") || "/dashboard";
+
     const supabase = await getSupabaseServerClient();
     const {
       data: { user },
@@ -45,22 +48,18 @@ export async function GET() {
     );
 
     const url = oauth2Client.generateAuthUrl({
-      // As per your outline, 'offline' is crucial for getting a refresh token
       access_type: "offline",
-      // As per your outline, 'consent' is crucial to ensure the user is prompted for all scopes
-      // and that a refresh token is issued even if they've authorized before.
       prompt: "consent",
-      // As per your outline, we need the readonly scope for Gmail.
       scope: [
         "https://www.googleapis.com/auth/userinfo.email",
         "https://www.googleapis.com/auth/userinfo.profile",
         "https://www.googleapis.com/auth/gmail.readonly",
       ],
-      // As per your outline
       include_granted_scopes: true,
+      state: redirect,
     });
 
-    return NextResponse.json({ url });
+    return NextResponse.redirect(url);
   } catch (error: any) {
     console.error("OAuth start error:", error);
     return NextResponse.json({ 

@@ -37,12 +37,16 @@ export async function middleware(req: NextRequest) {
     }
   }
 
-  // Redirect authenticated users away from /auth
+  // Redirect authenticated users away from /auth (unless they came from onboarding)
   if (req.nextUrl.pathname === "/auth") {
     const {
       data: { session }
     } = await supabase.auth.getSession()
     if (session) {
+      const redirectedFrom = req.nextUrl.searchParams.get("redirectedFrom")
+      if (redirectedFrom?.startsWith("/onboard")) {
+        return NextResponse.redirect(new URL(redirectedFrom, req.url))
+      }
       return NextResponse.redirect(new URL("/dashboard", req.url))
     }
   }
