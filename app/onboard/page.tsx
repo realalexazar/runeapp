@@ -596,11 +596,11 @@ function OnboardFlow() {
       ) : (
         <>
           <div ref={scrollRef} className="flex-1 overflow-y-auto overscroll-contain">
-            <div className="mx-auto max-w-[560px] px-4 pb-4 pt-80 sm:px-5">
+            <div className="mx-auto max-w-[560px] px-4 pb-4 sm:px-5">
               {showGreeting ? (
                 <GreetingScreen greeting={greeting} showPrompt={showGreetingPrompt} />
               ) : (
-                <div className="space-y-5">
+                <div className="space-y-5 pt-80">
                   {messages.map((msg) =>
                     msg.role === "rune" ? (
                       <RuneMessage key={msg.id} content={msg.content} />
