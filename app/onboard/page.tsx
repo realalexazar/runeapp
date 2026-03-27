@@ -154,6 +154,31 @@ function CompletionScreen() {
   )
 }
 
+function useViewportHeight() {
+  const [height, setHeight] = useState<number | null>(null)
+
+  useEffect(() => {
+    const viewport = window.visualViewport
+
+    const update = () => {
+      setHeight(Math.round(viewport?.height ?? window.innerHeight))
+    }
+
+    update()
+    viewport?.addEventListener("resize", update)
+    viewport?.addEventListener("scroll", update)
+    window.addEventListener("resize", update)
+
+    return () => {
+      viewport?.removeEventListener("resize", update)
+      viewport?.removeEventListener("scroll", update)
+      window.removeEventListener("resize", update)
+    }
+  }, [])
+
+  return height
+}
+
 const UI_GREETINGS = [
   "Hey, I'm Rune.",
   "Hi, I'm Rune.",
@@ -172,20 +197,9 @@ function GreetingScreen({
   return (
     <div className="relative flex min-h-full items-center justify-center px-6 pb-32 pt-36 text-center">
       <div className="pointer-events-none absolute inset-0 overflow-hidden">
-        <svg
-          viewBox="0 0 100 100"
-          className="intro-bolt absolute left-1/2 top-1/2 h-[72vh] w-[92vw] -translate-x-1/2 -translate-y-1/2 opacity-0"
-          aria-hidden="true"
-        >
-          <path
-            d="M85 2 L66 22 L75 22 L49 51 L58 51 L28 82 L36 82 L18 98"
-            fill="none"
-            stroke="rgba(172, 120, 255, 0.95)"
-            strokeWidth="1.7"
-            strokeLinecap="round"
-            strokeLinejoin="round"
-          />
-        </svg>
+        <div className="intro-surge-shell absolute inset-y-[-18%] left-[-40%] w-[180%]" />
+        <div className="intro-surge-core absolute inset-y-[-18%] left-[-40%] w-[180%]" />
+        <div className="intro-surge-flare absolute inset-0" />
       </div>
       <div className="max-w-[320px]">
         <div
@@ -301,6 +315,7 @@ function RecommendationCard({
 function OnboardFlow() {
   const searchParams = useSearchParams()
   const router = useRouter()
+  const viewportHeight = useViewportHeight()
 
   const [messages, setMessages] = useState<ChatMessage[]>([])
   const [input, setInput] = useState("")
@@ -323,6 +338,24 @@ function OnboardFlow() {
     () => UI_GREETINGS[Math.floor(Math.random() * UI_GREETINGS.length)],
     []
   )
+
+  useEffect(() => {
+    const html = document.documentElement
+    const body = document.body
+    const prevHtmlOverflow = html.style.overflow
+    const prevBodyOverflow = body.style.overflow
+    const prevBodyOverscrollBehavior = body.style.overscrollBehavior
+
+    html.style.overflow = "hidden"
+    body.style.overflow = "hidden"
+    body.style.overscrollBehavior = "none"
+
+    return () => {
+      html.style.overflow = prevHtmlOverflow
+      body.style.overflow = prevBodyOverflow
+      body.style.overscrollBehavior = prevBodyOverscrollBehavior
+    }
+  }, [])
 
   const scrollToBottom = useCallback(() => {
     setTimeout(() => scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: "smooth" }), 100)
@@ -382,6 +415,9 @@ function OnboardFlow() {
       setTyping(false)
       if (data.ok && data.rune_message) {
         addRuneMessage(data.rune_message)
+        requestAnimationFrame(() => {
+          scrollRef.current?.scrollTo({ top: 0, behavior: "auto" })
+        })
       } else {
         addRuneMessage("Hey — something went wrong on my end. Refresh and let's try again.")
       }
@@ -396,6 +432,7 @@ function OnboardFlow() {
     setShowGreetingPrompt(false)
     scrollRef.current?.scrollTo({ top: 0, behavior: "auto" })
     fetchOpening()
+    requestAnimationFrame(() => inputRef.current?.focus())
   }
 
   async function handleSend() {
@@ -593,18 +630,18 @@ function OnboardFlow() {
   }
 
   return (
-    <div className="fixed inset-0 z-40 h-[100dvh]" style={{ background: "#07070d" }}>
+    <div
+      className="fixed inset-x-0 top-0 z-40 flex flex-col overflow-hidden"
+      style={{ background: "#07070d", height: viewportHeight ? `${viewportHeight}px` : "100dvh" }}
+    >
 
       {phase === "approved" ? (
         <div className="flex h-full items-center justify-center">
           <CompletionScreen />
         </div>
       ) : (
-        <div
-          ref={scrollRef}
-          className="absolute inset-0 overflow-y-auto overscroll-contain"
-        >
-          <div className="mx-auto max-w-[560px] px-4 pb-32 pt-28 sm:px-5 sm:pb-36 sm:pt-20">
+        <div ref={scrollRef} className="min-h-0 flex-1 overflow-y-auto overscroll-contain">
+          <div className="mx-auto max-w-[560px] px-4 pb-8 pt-32 sm:px-5 sm:pb-10 sm:pt-20">
             {showGreeting ? (
               <GreetingScreen greeting={greeting} showPrompt={showGreetingPrompt} />
             ) : (
@@ -634,7 +671,7 @@ function OnboardFlow() {
       )}
 
       {showInput && (
-        <div className="fixed inset-x-0 bottom-0 z-50 px-2 pb-[max(0.625rem,env(safe-area-inset-bottom))] pt-2 sm:px-5">
+        <div className="relative z-50 shrink-0 px-2 pb-[max(0.625rem,env(safe-area-inset-bottom))] pt-2 sm:px-5">
           <div className="absolute top-0 left-0 right-0 h-px bg-gradient-to-r from-transparent via-white/[0.06] to-transparent" />
           <div className="mx-auto w-[calc(100%-8px)] max-w-[420px] sm:w-full sm:max-w-[460px]">
             <div
