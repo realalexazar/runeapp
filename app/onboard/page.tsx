@@ -170,13 +170,29 @@ function GreetingScreen({
   showPrompt: boolean
 }) {
   return (
-    <div className="flex min-h-full items-center justify-center px-6 pb-28 pt-32 text-center">
+    <div className="relative flex min-h-full items-center justify-center px-6 pb-32 pt-36 text-center">
+      <div className="pointer-events-none absolute inset-0 overflow-hidden">
+        <svg
+          viewBox="0 0 100 100"
+          className="intro-bolt absolute left-1/2 top-1/2 h-[72vh] w-[92vw] -translate-x-1/2 -translate-y-1/2 opacity-0"
+          aria-hidden="true"
+        >
+          <path
+            d="M85 2 L66 22 L75 22 L49 51 L58 51 L28 82 L36 82 L18 98"
+            fill="none"
+            stroke="rgba(172, 120, 255, 0.95)"
+            strokeWidth="1.7"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          />
+        </svg>
+      </div>
       <div className="max-w-[320px]">
         <div
           className="text-[34px] font-semibold leading-none text-white sm:text-[40px]"
           style={{
             fontFamily: "var(--font-serif)",
-            textShadow: "0 0 22px rgba(255,255,255,0.18), 0 0 44px rgba(180,220,255,0.08)",
+            textShadow: "0 0 30px rgba(255,255,255,0.35), 0 0 60px rgba(180,220,255,0.15), 0 0 8px rgba(255,255,255,0.2)",
           }}
         >
           {greeting}
@@ -187,7 +203,7 @@ function GreetingScreen({
             showPrompt ? "opacity-100 translate-y-0" : "opacity-0 translate-y-2",
           ].join(" ")}
         >
-          Click chat to begin
+          Click below to begin
         </div>
       </div>
     </div>
@@ -378,6 +394,7 @@ function OnboardFlow() {
   function beginConversation() {
     if (phase !== "conversation" || conversationStarted || messages.length > 0) return
     setShowGreetingPrompt(false)
+    scrollRef.current?.scrollTo({ top: 0, behavior: "auto" })
     fetchOpening()
   }
 
@@ -585,9 +602,9 @@ function OnboardFlow() {
       ) : (
         <div
           ref={scrollRef}
-          className="absolute inset-x-0 top-0 bottom-[88px] overflow-y-auto overscroll-contain"
+          className="absolute inset-0 overflow-y-auto overscroll-contain"
         >
-          <div className="mx-auto max-w-[560px] px-5 pb-10 pt-28 sm:pt-20">
+          <div className="mx-auto max-w-[560px] px-4 pb-32 pt-28 sm:px-5 sm:pb-36 sm:pt-20">
             {showGreeting ? (
               <GreetingScreen greeting={greeting} showPrompt={showGreetingPrompt} />
             ) : (
@@ -617,10 +634,13 @@ function OnboardFlow() {
       )}
 
       {showInput && (
-        <div className="absolute inset-x-0 bottom-0 px-3 pb-[max(0.5rem,env(safe-area-inset-bottom))] pt-2 sm:px-5">
+        <div className="fixed inset-x-0 bottom-0 z-50 px-2 pb-[max(0.625rem,env(safe-area-inset-bottom))] pt-2 sm:px-5">
           <div className="absolute top-0 left-0 right-0 h-px bg-gradient-to-r from-transparent via-white/[0.06] to-transparent" />
-          <div className="mx-auto max-w-[460px]">
-            <div className="flex items-center gap-2 rounded-2xl bg-[#12121a] ring-1 ring-white/[0.08] px-3 py-2.5 sm:px-4 sm:py-3 focus-within:ring-white/[0.15] transition-all">
+          <div className="mx-auto w-[calc(100%-8px)] max-w-[420px] sm:w-full sm:max-w-[460px]">
+            <div
+              className="flex items-center gap-2 rounded-2xl bg-[#12121a] ring-1 ring-white/[0.08] px-3 py-2.5 sm:px-4 sm:py-3 focus-within:ring-white/[0.15] transition-all"
+              onClick={beginConversation}
+            >
               <textarea
                 ref={inputRef}
                 value={input}
@@ -630,7 +650,7 @@ function OnboardFlow() {
                 placeholder="Message Rune..."
                 disabled={loading}
                 rows={1}
-                className="flex-1 resize-none bg-transparent text-[14px] sm:text-[15px] text-white placeholder-white/25 outline-none disabled:opacity-50 leading-relaxed max-h-[100px]"
+                className="flex-1 resize-none bg-transparent text-[16px] text-white placeholder-white/25 outline-none disabled:opacity-50 leading-relaxed max-h-[100px]"
               />
               <button
                 onClick={handleSend}

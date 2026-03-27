@@ -91,6 +91,35 @@
   animation: aurora-drift 40s ease-in-out infinite;
 }
 
+@keyframes intro-bolt-flash {
+  0% {
+    opacity: 0;
+    filter: drop-shadow(0 0 0 rgba(172, 120, 255, 0));
+  }
+  12% {
+    opacity: 0.95;
+    filter: drop-shadow(0 0 10px rgba(172, 120, 255, 0.95)) drop-shadow(0 0 24px rgba(120, 92, 255, 0.6));
+  }
+  22% {
+    opacity: 0.3;
+  }
+  30% {
+    opacity: 0.85;
+    filter: drop-shadow(0 0 14px rgba(172, 120, 255, 0.95)) drop-shadow(0 0 30px rgba(120, 92, 255, 0.55));
+  }
+  46% {
+    opacity: 0.08;
+  }
+  100% {
+    opacity: 0;
+    filter: drop-shadow(0 0 0 rgba(172, 120, 255, 0));
+  }
+}
+
+.intro-bolt {
+  animation: intro-bolt-flash 900ms ease-out 1 forwards;
+}
+
 @layer base {
   * {
     @apply border-border;

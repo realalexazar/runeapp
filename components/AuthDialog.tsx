@@ -91,13 +91,13 @@ export default function AuthDialog({ open, onOpenChange, initialMode = "signup" 
               <input
                 type="email"
                 placeholder="Email"
-                className="w-full rounded-md border border-white/15 bg-white/5 p-3 text-white placeholder-white/40 outline-none focus:border-white/30"
+                className="w-full rounded-md border border-white/15 bg-white/5 p-3 text-[16px] text-white placeholder-white/40 outline-none focus:border-white/30"
                 onChange={(e) => setEmail(e.target.value)}
               />
               <input
                 type="password"
                 placeholder="Password"
-                className="w-full rounded-md border border-white/15 bg-white/5 p-3 text-white placeholder-white/40 outline-none focus:border-white/30"
+                className="w-full rounded-md border border-white/15 bg-white/5 p-3 text-[16px] text-white placeholder-white/40 outline-none focus:border-white/30"
                 onChange={(e) => setPassword(e.target.value)}
               />
             </div>

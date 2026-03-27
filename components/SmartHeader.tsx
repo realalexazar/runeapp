@@ -81,18 +81,13 @@ export default function SmartHeader() {
         <Link href="/" className="font-serif text-xl text-white">Rune</Link>
         <div className="flex items-center gap-4">
           {user ? (
-            <>
-              <Link href="/dashboard">
-                <Button className="bg-white/15 text-white hover:bg-white/25">Dashboard</Button>
-              </Link>
-              <Button 
-                variant="outline" 
-                className="bg-white/5 border-white/20 text-white hover:bg-white/10"
-                onClick={handleSignOut}
-              >
-                Sign Out
-              </Button>
-            </>
+            <Button 
+              variant="outline" 
+              className="bg-white/5 border-white/20 text-white hover:bg-white/10 text-sm px-4"
+              onClick={handleSignOut}
+            >
+              Sign Out
+            </Button>
           ) : (
             <>
               <Button 

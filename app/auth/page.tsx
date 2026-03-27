@@ -51,13 +51,13 @@ export default function Auth() {
         type="email"
         placeholder="Email"
         onChange={(e) => setEmail(e.target.value)}
-        className="mb-2 p-2 border"
+        className="mb-2 border p-2 text-[16px]"
       />
       <input
         type="password"
         placeholder="Password"
         onChange={(e) => setPassword(e.target.value)}
-        className="mb-2 p-2 border"
+        className="mb-2 border p-2 text-[16px]"
       />
       <button onClick={handleSignIn} className="bg-blue-500 text-white p-2">
         Login
