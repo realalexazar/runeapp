@@ -97,12 +97,18 @@ export default function SmartHeader() {
             <>
               <Button 
                 variant="outline" 
-                className="bg-white/5 border-white/20 text-white hover:bg-white/10"
+                className="bg-white/5 border-white/20 text-white hover:bg-white/10 text-sm px-4"
                 onClick={() => setLoginOpen(true)}
               >
                 Login
               </Button>
-              <Button onClick={() => setSignupOpen(true)}>Sign Up</Button>
+              <Button 
+                variant="outline" 
+                className="bg-white/8 border-white/20 text-white hover:bg-white/12 backdrop-blur-md text-sm px-4"
+                onClick={() => setSignupOpen(true)}
+              >
+                Sign Up
+              </Button>
             </>
           )}
         </div>

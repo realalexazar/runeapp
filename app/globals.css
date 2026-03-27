@@ -59,7 +59,7 @@
   }
 }
 
-@keyframes subtle-swirl {
+@keyframes aurora-drift {
   0% {
     background-position: 0% 50%;
   }
@@ -72,11 +72,23 @@
 }
 
 .swirling-background {
-  background: radial-gradient(circle at 20% 20%, hsl(270, 50%, 15%, 0.2), transparent 40%),
-              radial-gradient(circle at 80% 70%, hsl(250, 60%, 20%, 0.2), transparent 40%),
-              #0B0B0F;
+  background:
+    radial-gradient(circle at 20% 20%, hsl(180, 60%, 15%, 0.12), transparent 45%),
+    radial-gradient(circle at 75% 70%, hsl(270, 50%, 18%, 0.10), transparent 45%),
+    radial-gradient(circle at 60% 30%, hsl(30, 50%, 15%, 0.06), transparent 40%),
+    #0A0A12;
   background-size: 200% 200%;
-  animation: subtle-swirl 30s ease-in-out infinite;
+  animation: aurora-drift 35s ease-in-out infinite;
+}
+
+.hero-aurora {
+  background:
+    radial-gradient(ellipse at 25% 25%, hsl(180, 55%, 14%, 0.18), transparent 50%),
+    radial-gradient(ellipse at 75% 65%, hsl(270, 45%, 16%, 0.14), transparent 50%),
+    radial-gradient(ellipse at 55% 80%, hsl(30, 45%, 12%, 0.08), transparent 40%),
+    #0A0A12;
+  background-size: 200% 200%;
+  animation: aurora-drift 40s ease-in-out infinite;
 }
 
 @layer base {
@@ -84,6 +96,6 @@
     @apply border-border;
   }
   body {
-    @apply bg-background font-sans text-foreground overflow-hidden;
+    @apply bg-background font-sans text-foreground;
   }
 }

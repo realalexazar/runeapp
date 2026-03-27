@@ -70,10 +70,18 @@ export default function AuthDialog({ open, onOpenChange, initialMode = "signup" 
           </div>
 
           <div className="mb-4 flex gap-2">
-            <Button variant={mode === "signup" ? "default" : "outline"} onClick={() => setMode("signup")}>
+            <Button 
+              variant="outline" 
+              className={mode === "signup" ? "bg-white/12 border-white/25 text-white" : "bg-white/5 border-white/10 text-white/50"}
+              onClick={() => setMode("signup")}
+            >
               Sign Up
             </Button>
-            <Button variant={mode === "login" ? "default" : "outline"} onClick={() => setMode("login")}>
+            <Button 
+              variant="outline" 
+              className={mode === "login" ? "bg-white/12 border-white/25 text-white" : "bg-white/5 border-white/10 text-white/50"}
+              onClick={() => setMode("login")}
+            >
               Login
             </Button>
           </div>
@@ -96,7 +104,12 @@ export default function AuthDialog({ open, onOpenChange, initialMode = "signup" 
 
             {error && <p className="text-sm text-red-400">{error}</p>}
 
-            <Button className="w-full" disabled={loading} onClick={handleEmailAuth}>
+            <Button 
+              variant="outline" 
+              className="w-full bg-white/10 border-white/20 text-white hover:bg-white/15" 
+              disabled={loading} 
+              onClick={handleEmailAuth}
+            >
               {loading ? "Please wait..." : mode === "signup" ? "Create account" : "Login"}
             </Button>
 

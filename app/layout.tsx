@@ -26,25 +26,23 @@ const playfair = Playfair_Display({
 })
 
 export const metadata: Metadata = {
-  metadataBase: new URL('https://your-domain.com'),
   title: {
-    default: 'Mortgage App',
-    template: '%s | Mortgage App'
+    default: 'Rune',
+    template: '%s | Rune'
   },
-  description: 'A modern B2C/B2B mortgage web application.',
+  description: 'Your personalized daily intelligence briefing.',
   robots: 'index,follow',
   icons: { icon: '/favicon.ico' },
   openGraph: {
-    title: 'Mortgage App',
-    description: 'A modern B2C/B2B mortgage web application.',
-    url: 'https://your-domain.com',
-    siteName: 'Mortgage App',
+    title: 'Rune',
+    description: 'Your personalized daily intelligence briefing.',
+    siteName: 'Rune',
     type: 'website'
   },
   twitter: {
     card: 'summary_large_image',
-    title: 'Mortgage App',
-    description: 'A modern B2C/B2B mortgage web application.'
+    title: 'Rune',
+    description: 'Your personalized daily intelligence briefing.'
   }
 }
 
