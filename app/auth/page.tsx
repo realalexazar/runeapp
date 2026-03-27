@@ -18,7 +18,7 @@ export default function Auth() {
       return;
     }
 
-    console.log("Signed up:", data.user);
+    window.location.href = "/onboard";
   }
 
   async function handleSignIn() {
@@ -32,14 +32,14 @@ export default function Auth() {
       return;
     }
 
-    console.log("Signed in:", data.user);
+    window.location.href = "/onboard";
   }
 
   async function handleGoogle() {
     await supabase.auth.signInWithOAuth({
       provider: "google",
       options: {
-        redirectTo: `${location.origin}/auth/callback?next=/dashboard`,
+        redirectTo: `${location.origin}/auth/callback?next=/onboard`,
       },
     });
   }

@@ -33,6 +33,7 @@ export default function AuthDialog({ open, onOpenChange, initialMode = "signup" 
         if (error) throw error
       }
       onOpenChange(false)
+      window.location.href = "/onboard"
     } catch (e: any) {
       setError(e?.message ?? "Something went wrong")
     } finally {
@@ -46,7 +47,7 @@ export default function AuthDialog({ open, onOpenChange, initialMode = "signup" 
     try {
       await supabase.auth.signInWithOAuth({
         provider: "google",
-        options: { redirectTo: `${location.origin}/auth/callback?next=/dashboard` }
+        options: { redirectTo: `${location.origin}/auth/callback?next=/onboard` }
       })
     } catch (e: any) {
       setError(e?.message ?? "Something went wrong")
