@@ -181,7 +181,7 @@ function extractSignal(text: string): { type: "intent" | "recommendation" | null
 
 function stripJsonBlock(text: string): string {
   // Case 1: Complete JSON block with closing fence
-  let stripped = text.replace(/```(?:json)?\s*\{[\s\S]*\}\s*```\s*$/, "").trim()
+  const stripped = text.replace(/```(?:json)?\s*\{[\s\S]*\}\s*```\s*$/, "").trim()
   if (stripped !== text.trim()) return stripped
 
   // Case 2: Truncated JSON block — opening fence but no closing fence

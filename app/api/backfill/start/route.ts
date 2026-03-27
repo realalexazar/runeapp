@@ -33,7 +33,7 @@ export async function POST() {
   const gmail = google.gmail({ version: "v1", auth: oauth2Client })
 
   // Build fetch query: first run = last 14d (2 weeks); subsequent runs = last 2d (overlapped)
-  let qBase = "(category:primary OR category:updates)"
+  const qBase = "(category:primary OR category:updates)"
   let qWindow = "newer_than:14d"
   try {
     const state = await supabaseServiceRole

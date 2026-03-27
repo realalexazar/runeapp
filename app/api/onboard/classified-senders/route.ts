@@ -136,7 +136,7 @@ export async function GET() {
       }
 
       // Fall back to parsed domain name
-      let domainName = senderKey
+      const domainName = senderKey
         .replace(/\.com$/, "")
         .replace(/\.org$/, "")
         .replace(/\.net$/, "")
