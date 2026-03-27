@@ -154,31 +154,6 @@ function CompletionScreen() {
   )
 }
 
-function useViewportHeight() {
-  const [height, setHeight] = useState<number | null>(null)
-
-  useEffect(() => {
-    const viewport = window.visualViewport
-
-    const update = () => {
-      setHeight(Math.round(viewport?.height ?? window.innerHeight))
-    }
-
-    update()
-    viewport?.addEventListener("resize", update)
-    viewport?.addEventListener("scroll", update)
-    window.addEventListener("resize", update)
-
-    return () => {
-      viewport?.removeEventListener("resize", update)
-      viewport?.removeEventListener("scroll", update)
-      window.removeEventListener("resize", update)
-    }
-  }, [])
-
-  return height
-}
-
 const UI_GREETINGS = [
   "Hey, I'm Rune.",
   "Hi, I'm Rune.",
@@ -187,20 +162,9 @@ const UI_GREETINGS = [
   "Welcome. I'm Rune.",
 ]
 
-function GreetingScreen({
-  greeting,
-  showPrompt,
-}: {
-  greeting: string
-  showPrompt: boolean
-}) {
+function GreetingScreen({ greeting, showPrompt }: { greeting: string; showPrompt: boolean }) {
   return (
-    <div className="relative flex min-h-full items-center justify-center px-6 pb-32 pt-36 text-center">
-      <div className="pointer-events-none absolute inset-0 overflow-hidden">
-        <div className="intro-surge-shell absolute inset-y-[-18%] left-[-40%] w-[180%]" />
-        <div className="intro-surge-core absolute inset-y-[-18%] left-[-40%] w-[180%]" />
-        <div className="intro-surge-flare absolute inset-0" />
-      </div>
+    <div className="flex min-h-[60dvh] items-center justify-center px-6 text-center">
       <div className="max-w-[320px]">
         <div
           className="text-[34px] font-semibold leading-none text-white sm:text-[40px]"
@@ -315,7 +279,6 @@ function RecommendationCard({
 function OnboardFlow() {
   const searchParams = useSearchParams()
   const router = useRouter()
-  const viewportHeight = useViewportHeight()
 
   const [messages, setMessages] = useState<ChatMessage[]>([])
   const [input, setInput] = useState("")
@@ -328,6 +291,7 @@ function OnboardFlow() {
   const [approving, setApproving] = useState(false)
   const [showGreetingPrompt, setShowGreetingPrompt] = useState(false)
   const [conversationStarted, setConversationStarted] = useState(false)
+  const [showSurge, setShowSurge] = useState(true)
 
   const conversationHistory = useRef<Array<{ role: "user" | "assistant"; content: string }>>([])
   const scrollRef = useRef<HTMLDivElement>(null)
@@ -338,24 +302,6 @@ function OnboardFlow() {
     () => UI_GREETINGS[Math.floor(Math.random() * UI_GREETINGS.length)],
     []
   )
-
-  useEffect(() => {
-    const html = document.documentElement
-    const body = document.body
-    const prevHtmlOverflow = html.style.overflow
-    const prevBodyOverflow = body.style.overflow
-    const prevBodyOverscrollBehavior = body.style.overscrollBehavior
-
-    html.style.overflow = "hidden"
-    body.style.overflow = "hidden"
-    body.style.overscrollBehavior = "none"
-
-    return () => {
-      html.style.overflow = prevHtmlOverflow
-      body.style.overflow = prevBodyOverflow
-      body.style.overscrollBehavior = prevBodyOverscrollBehavior
-    }
-  }, [])
 
   const scrollToBottom = useCallback(() => {
     setTimeout(() => scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: "smooth" }), 100)
@@ -389,13 +335,18 @@ function OnboardFlow() {
         if (savedIntent) setIntentData(JSON.parse(savedIntent))
       } catch {}
       setConversationStarted(true)
+      setShowSurge(false)
       setPhase("scanning")
       runInboxScan()
       return
     }
 
-    const timer = window.setTimeout(() => setShowGreetingPrompt(true), 600)
-    return () => window.clearTimeout(timer)
+    const surgeTimer = window.setTimeout(() => setShowSurge(false), 1200)
+    const promptTimer = window.setTimeout(() => setShowGreetingPrompt(true), 600)
+    return () => {
+      window.clearTimeout(surgeTimer)
+      window.clearTimeout(promptTimer)
+    }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
@@ -415,9 +366,9 @@ function OnboardFlow() {
       setTyping(false)
       if (data.ok && data.rune_message) {
         addRuneMessage(data.rune_message)
-        requestAnimationFrame(() => {
+        setTimeout(() => {
           scrollRef.current?.scrollTo({ top: 0, behavior: "auto" })
-        })
+        }, 50)
       } else {
         addRuneMessage("Hey — something went wrong on my end. Refresh and let's try again.")
       }
@@ -430,9 +381,7 @@ function OnboardFlow() {
   function beginConversation() {
     if (phase !== "conversation" || conversationStarted || messages.length > 0) return
     setShowGreetingPrompt(false)
-    scrollRef.current?.scrollTo({ top: 0, behavior: "auto" })
     fetchOpening()
-    requestAnimationFrame(() => inputRef.current?.focus())
   }
 
   async function handleSend() {
@@ -630,75 +579,81 @@ function OnboardFlow() {
   }
 
   return (
-    <div
-      className="fixed inset-x-0 top-0 z-40 flex flex-col overflow-hidden"
-      style={{ background: "#07070d", height: viewportHeight ? `${viewportHeight}px` : "100dvh" }}
-    >
-
-      {phase === "approved" ? (
-        <div className="flex h-full items-center justify-center">
-          <CompletionScreen />
-        </div>
-      ) : (
-        <div ref={scrollRef} className="min-h-0 flex-1 overflow-y-auto overscroll-contain">
-          <div className="mx-auto max-w-[560px] px-4 pb-8 pt-32 sm:px-5 sm:pb-10 sm:pt-20">
-            {showGreeting ? (
-              <GreetingScreen greeting={greeting} showPrompt={showGreetingPrompt} />
-            ) : (
-              <div className="space-y-5">
-                {messages.map((msg) =>
-                  msg.role === "rune" ? (
-                    <RuneMessage key={msg.id} content={msg.content} />
-                  ) : (
-                    <UserMessage key={msg.id} content={msg.content} />
-                  )
-                )}
-
-                {typing && <TypingIndicator />}
-                {phase === "gmail_connect" && !loading && <GmailButton />}
-                {phase === "scanning" && typing && <ScanningIndicator />}
-                {recommendationData && phase === "recommendation" && (
-                  <RecommendationCard
-                    data={recommendationData}
-                    onApprove={handleApprove}
-                    approving={approving}
-                  />
-                )}
-              </div>
-            )}
-          </div>
+    <div className="h-[100dvh] flex flex-col" style={{ background: "#07070d" }}>
+      {/* Energy surge overlay */}
+      {showSurge && (
+        <div className="pointer-events-none fixed inset-0 z-[60]">
+          <div className="intro-surge-shell absolute inset-0" />
+          <div className="intro-surge-core absolute inset-0" />
+          <div className="intro-surge-flare absolute inset-0" />
         </div>
       )}
 
-      {showInput && (
-        <div className="relative z-50 shrink-0 px-2 pb-[max(0.625rem,env(safe-area-inset-bottom))] pt-2 sm:px-5">
-          <div className="absolute top-0 left-0 right-0 h-px bg-gradient-to-r from-transparent via-white/[0.06] to-transparent" />
-          <div className="mx-auto w-[calc(100%-8px)] max-w-[420px] sm:w-full sm:max-w-[460px]">
-            <div
-              className="flex items-center gap-2 rounded-2xl bg-[#12121a] ring-1 ring-white/[0.08] px-3 py-2.5 sm:px-4 sm:py-3 focus-within:ring-white/[0.15] transition-all"
-              onClick={beginConversation}
-            >
-              <textarea
-                ref={inputRef}
-                value={input}
-                onFocus={beginConversation}
-                onChange={handleTextareaInput}
-                onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); handleSend() } }}
-                placeholder="Message Rune..."
-                disabled={loading}
-                rows={1}
-                className="flex-1 resize-none bg-transparent text-[16px] text-white placeholder-white/25 outline-none disabled:opacity-50 leading-relaxed max-h-[100px]"
-              />
-              <button
-                onClick={handleSend}
-                disabled={!input.trim() || loading}
-                className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-white text-[#07070d] transition-all hover:bg-white/90 active:scale-95 disabled:opacity-20 disabled:bg-white/40"
-              >
-                {loading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <ArrowUp className="h-3.5 w-3.5 stroke-[2.5]" />}
-              </button>
+      {phase === "approved" ? (
+        <div className="flex flex-1 items-center justify-center">
+          <CompletionScreen />
+        </div>
+      ) : (
+        <>
+          <div ref={scrollRef} className="flex-1 overflow-y-auto overscroll-contain">
+            <div className="mx-auto max-w-[560px] px-4 pb-4 pt-6 sm:px-5">
+              {showGreeting ? (
+                <GreetingScreen greeting={greeting} showPrompt={showGreetingPrompt} />
+              ) : (
+                <div className="space-y-5">
+                  {messages.map((msg) =>
+                    msg.role === "rune" ? (
+                      <RuneMessage key={msg.id} content={msg.content} />
+                    ) : (
+                      <UserMessage key={msg.id} content={msg.content} />
+                    )
+                  )}
+
+                  {typing && <TypingIndicator />}
+                  {phase === "gmail_connect" && !loading && <GmailButton />}
+                  {phase === "scanning" && typing && <ScanningIndicator />}
+                  {recommendationData && phase === "recommendation" && (
+                    <RecommendationCard
+                      data={recommendationData}
+                      onApprove={handleApprove}
+                      approving={approving}
+                    />
+                  )}
+                </div>
+              )}
             </div>
           </div>
-        </div>
+
+          {showInput && (
+            <div className="shrink-0 px-2 pb-[max(0.5rem,env(safe-area-inset-bottom))] pt-2 sm:px-5" style={{ background: "#07070d" }}>
+              <div className="mx-auto w-[calc(100%-8px)] max-w-[420px] sm:w-full sm:max-w-[460px]">
+                <div
+                  className="flex items-center gap-2 rounded-2xl bg-[#12121a] ring-1 ring-white/[0.08] px-3 py-2.5 sm:px-4 sm:py-3 focus-within:ring-white/[0.15] transition-all"
+                  onClick={beginConversation}
+                >
+                  <textarea
+                    ref={inputRef}
+                    value={input}
+                    onFocus={beginConversation}
+                    onChange={handleTextareaInput}
+                    onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); handleSend() } }}
+                    placeholder="Message Rune..."
+                    disabled={loading}
+                    rows={1}
+                    className="flex-1 resize-none bg-transparent text-[16px] text-white placeholder-white/25 outline-none disabled:opacity-50 leading-relaxed max-h-[100px]"
+                  />
+                  <button
+                    onClick={handleSend}
+                    disabled={!input.trim() || loading}
+                    className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-white text-[#07070d] transition-all hover:bg-white/90 active:scale-95 disabled:opacity-20 disabled:bg-white/40"
+                  >
+                    {loading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <ArrowUp className="h-3.5 w-3.5 stroke-[2.5]" />}
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
+        </>
       )}
     </div>
   )
