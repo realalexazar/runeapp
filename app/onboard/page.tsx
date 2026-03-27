@@ -11,42 +11,33 @@ type ChatMessage = {
   timestamp: number
 }
 
-type ProfileData = {
-  professional_context: string
-  stay_on_top_of: string[]
-  get_sharper_on: string | null
-  inferred_expertise_level: string
-  news_topic_suggestion: {
-    topic_text: string
-    retrieval_queries: string[]
-    required_terms: string[][]
-    scope_summary: string
-  } | null
-  lesson_topic_suggestion: {
-    topic_text: string | null
-    starting_level: string | null
-    curriculum_goal: string | null
-  } | null
+type SlotAllocation = {
+  slot: number
+  type: "email" | "news" | "lesson"
+  focus: string
+  priority_senders?: string[]
+  rationale?: string
+  retrieval_queries?: string[]
+  required_terms?: string[][]
+  scope_summary?: string
+  starting_level?: string
+  curriculum_goal?: string
 }
 
-type Recommendation = {
-  priority_newsletters: Array<{
-    address: string
-    name: string
-    category: string
-    relevance_score: number
-    relevance_reason: string | null
-  }>
-  other_newsletters: Array<{
-    address: string
-    name: string
-    category: string
-    relevance_score: number
-  }>
-  news_topic: { text: string; scope: string } | null
-  lesson_topic: { text: string; curriculum_title: string } | null
-  delivery_time: string
-  recommended_config?: Record<string, any>
+type RecommendationData = {
+  slot_allocation: SlotAllocation[]
+  allocation_notes?: string
+  inbox_curation_plan?: {
+    priority_senders: string[]
+    email_types_to_surface: string[]
+    gap_note?: string
+  }
+  user_facing_summary?: string[]
+}
+
+type IntentData = {
+  wants_inbox_curation?: boolean
+  [key: string]: any
 }
 
 function uid() {
@@ -134,92 +125,109 @@ function ScanningIndicator() {
   )
 }
 
+const SLOT_ICONS: Record<string, React.ReactNode> = {
+  email: <Mail className="h-3.5 w-3.5 text-white/30" />,
+  news: <Newspaper className="h-3.5 w-3.5 text-white/30" />,
+  lesson: <BookOpen className="h-3.5 w-3.5 text-white/30" />,
+}
+
+const SLOT_LABELS: Record<string, string> = {
+  email: "Inbox Curation",
+  news: "Daily Intelligence",
+  lesson: "Learning Track",
+}
+
+function CompletionScreen() {
+  return (
+    <div className="animate-in fade-in duration-500 flex flex-col items-center justify-center py-16 px-6 text-center">
+      <div className="mb-6 flex h-16 w-16 items-center justify-center rounded-2xl bg-emerald-500/10 ring-1 ring-emerald-500/20">
+        <Check className="h-8 w-8 text-emerald-400" />
+      </div>
+      <h2 className="mb-2 text-[20px] font-semibold text-white">You&apos;re all set.</h2>
+      <p className="mb-1 text-[15px] text-white/60 leading-relaxed max-w-[320px]">
+        Your first delivery arrives tomorrow at 7:00 AM.
+      </p>
+      <p className="text-[13px] text-white/35 max-w-[280px]">
+        Five minutes every morning — that&apos;s all it takes.
+      </p>
+    </div>
+  )
+}
+
 function RecommendationCard({
-  recommendation,
+  data,
   onApprove,
-  approving
+  approving,
 }: {
-  recommendation: Recommendation
+  data: RecommendationData
   onApprove: () => void
   approving: boolean
 }) {
-  const [showOther, setShowOther] = useState(false)
+  const [showDetails, setShowDetails] = useState(false)
 
   return (
     <div className="animate-in fade-in slide-in-from-bottom-2 duration-500 mt-2">
       <div className="rounded-2xl border border-white/[0.08] bg-white/[0.03] p-5 backdrop-blur-sm">
-        <p className="mb-4 text-[15px] font-medium text-white">Here&apos;s your daily brief:</p>
-
-        {recommendation.priority_newsletters.length > 0 && (
-          <div className="mb-4">
-            <div className="mb-2 flex items-center gap-2">
-              <Mail className="h-3.5 w-3.5 text-white/30" />
-              <span className="text-[11px] font-semibold uppercase tracking-[0.08em] text-white/40">Newsletters</span>
-            </div>
-            <div className="space-y-1">
-              {recommendation.priority_newsletters.map((nl) => (
-                <div key={nl.address} className="flex items-center gap-2.5 rounded-lg px-2.5 py-1.5 text-[13px] text-white/70 hover:bg-white/[0.03] transition-colors">
-                  <Check className="h-3.5 w-3.5 text-emerald-400/70 shrink-0" />
-                  <span className="flex-1 truncate">{nl.name}</span>
-                  <span className="text-[11px] text-white/25">{nl.category}</span>
-                </div>
-              ))}
-            </div>
-            {recommendation.other_newsletters.length > 0 && (
-              <button
-                onClick={() => setShowOther(!showOther)}
-                className="mt-1.5 flex items-center gap-1 px-2.5 text-[12px] text-white/30 hover:text-white/50 transition-colors"
-              >
-                {showOther ? <ChevronUp className="h-3 w-3" /> : <ChevronDown className="h-3 w-3" />}
-                +{recommendation.other_newsletters.length} monitored
-              </button>
-            )}
-            {showOther && (
-              <div className="mt-1 space-y-0.5 pl-2.5">
-                {recommendation.other_newsletters.map((nl) => (
-                  <div key={nl.address} className="text-[12px] text-white/25 py-0.5">
-                    {nl.name}
-                  </div>
-                ))}
+        {data.user_facing_summary && data.user_facing_summary.length > 0 && (
+          <div className="mb-4 space-y-2">
+            {data.user_facing_summary.map((line, i) => (
+              <div key={i} className="flex items-start gap-2.5 text-[13px] text-white/70">
+                <Check className="h-3.5 w-3.5 text-emerald-400/70 shrink-0 mt-0.5" />
+                <span>{line}</span>
               </div>
+            ))}
+          </div>
+        )}
+
+        <button
+          onClick={() => setShowDetails(!showDetails)}
+          className="mb-3 flex items-center gap-1 text-[12px] text-white/30 hover:text-white/50 transition-colors"
+        >
+          {showDetails ? <ChevronUp className="h-3 w-3" /> : <ChevronDown className="h-3 w-3" />}
+          {showDetails ? "Hide details" : "Show details"}
+        </button>
+
+        {showDetails && (
+          <div className="mb-4 space-y-3">
+            {data.slot_allocation.map((slot) => (
+              <div key={slot.slot} className="rounded-lg bg-white/[0.03] px-3 py-2.5 ring-1 ring-white/[0.05]">
+                <div className="flex items-center gap-2 mb-1">
+                  {SLOT_ICONS[slot.type] || null}
+                  <span className="text-[11px] font-semibold uppercase tracking-[0.08em] text-white/40">
+                    {SLOT_LABELS[slot.type] || slot.type}
+                  </span>
+                </div>
+                <p className="text-[13px] font-medium text-white/70">{slot.focus}</p>
+                {slot.rationale && (
+                  <p className="mt-1 text-[12px] text-white/30">{slot.rationale}</p>
+                )}
+                {slot.scope_summary && (
+                  <p className="mt-1 text-[12px] text-white/30 leading-relaxed">{slot.scope_summary}</p>
+                )}
+                {slot.curriculum_goal && (
+                  <p className="mt-1 text-[12px] text-white/30">{slot.curriculum_goal}</p>
+                )}
+              </div>
+            ))}
+
+            {data.inbox_curation_plan?.gap_note && (
+              <p className="text-[12px] text-amber-400/60 px-1">{data.inbox_curation_plan.gap_note}</p>
             )}
-          </div>
-        )}
-
-        {recommendation.news_topic && (
-          <div className="mb-4">
-            <div className="mb-2 flex items-center gap-2">
-              <Newspaper className="h-3.5 w-3.5 text-white/30" />
-              <span className="text-[11px] font-semibold uppercase tracking-[0.08em] text-white/40">Daily Intelligence</span>
-            </div>
-            <div className="rounded-lg bg-white/[0.03] px-3 py-2.5 ring-1 ring-white/[0.05]">
-              <p className="text-[13px] font-medium text-white/70">{recommendation.news_topic.text}</p>
-              <p className="mt-1 text-[12px] text-white/30 leading-relaxed">{recommendation.news_topic.scope}</p>
-            </div>
-          </div>
-        )}
-
-        {recommendation.lesson_topic && (
-          <div className="mb-4">
-            <div className="mb-2 flex items-center gap-2">
-              <BookOpen className="h-3.5 w-3.5 text-white/30" />
-              <span className="text-[11px] font-semibold uppercase tracking-[0.08em] text-white/40">10-Day Learning Track</span>
-            </div>
-            <div className="rounded-lg bg-white/[0.03] px-3 py-2.5 ring-1 ring-white/[0.05]">
-              <p className="text-[13px] font-medium text-white/70">{recommendation.lesson_topic.text}</p>
-              <p className="mt-1 text-[12px] text-white/30">{recommendation.lesson_topic.curriculum_title}</p>
-            </div>
           </div>
         )}
 
         <div className="mb-4 rounded-lg bg-blue-500/[0.06] px-3 py-2 ring-1 ring-blue-400/10">
-          <p className="text-[12px] text-blue-300/60">First brief arrives tomorrow at {recommendation.delivery_time}</p>
+          <p className="text-[12px] text-blue-300/60">First delivery arrives tomorrow at 7:00 AM</p>
         </div>
+
+        <p className="mb-3 text-[12px] text-white/30 text-center">
+          Adjust anything by typing below, or lock it in.
+        </p>
 
         <button
           onClick={onApprove}
           disabled={approving}
-          className="w-full rounded-xl bg-white py-3 text-[14px] font-semibold text-[#0b0b12] transition-all hover:bg-white/90 active:scale-[0.98] disabled:opacity-50"
+          className="w-full rounded-xl bg-white py-3 text-[14px] font-semibold text-[#07070d] transition-all hover:bg-white/90 active:scale-[0.98] disabled:opacity-50"
         >
           {approving ? (
             <span className="flex items-center justify-center gap-2">
@@ -243,13 +251,10 @@ function OnboardFlow() {
   const [loading, setLoading] = useState(false)
   const [typing, setTyping] = useState(false)
 
-  const [conversationComplete, setConversationComplete] = useState(false)
-  const [profileData, setProfileData] = useState<ProfileData | null>(null)
-  const [showGmail, setShowGmail] = useState(false)
-  const [scanning, setScanning] = useState(false)
-  const [recommendation, setRecommendation] = useState<Recommendation | null>(null)
+  const [phase, setPhase] = useState<"conversation" | "gmail_connect" | "scanning" | "recommendation" | "approved">("conversation")
+  const [intentData, setIntentData] = useState<IntentData | null>(null)
+  const [recommendationData, setRecommendationData] = useState<RecommendationData | null>(null)
   const [approving, setApproving] = useState(false)
-  const [approved, setApproved] = useState(false)
 
   const conversationHistory = useRef<Array<{ role: "user" | "assistant"; content: string }>>([])
   const scrollRef = useRef<HTMLDivElement>(null)
@@ -266,25 +271,28 @@ function OnboardFlow() {
     scrollToBottom()
   }, [scrollToBottom])
 
-  const showTypingThenMessage = useCallback((content: string, delay = 800) => {
-    setTyping(true)
-    scrollToBottom()
-    setTimeout(() => {
-      setTyping(false)
-      addRuneMessage(content)
-    }, delay)
-  }, [addRuneMessage, scrollToBottom])
-
   useEffect(() => {
     if (initDone.current) return
     initDone.current = true
 
     const stepParam = searchParams.get("step")
     if (stepParam === "scanning") {
-      setConversationComplete(true)
-      setShowGmail(false)
-      setScanning(true)
-      addRuneMessage("Gmail connected. Scanning your inbox now...")
+      try {
+        const saved = sessionStorage.getItem("rune_onboard_messages")
+        if (saved) {
+          const restored = JSON.parse(saved) as ChatMessage[]
+          setMessages(restored)
+          for (const m of restored) {
+            conversationHistory.current.push({
+              role: m.role === "rune" ? "assistant" : "user",
+              content: m.content
+            })
+          }
+        }
+        const savedIntent = sessionStorage.getItem("rune_onboard_intent")
+        if (savedIntent) setIntentData(JSON.parse(savedIntent))
+      } catch {}
+      setPhase("scanning")
       runInboxScan()
       return
     }
@@ -329,10 +337,12 @@ function OnboardFlow() {
     setTyping(true)
 
     try {
+      const currentPhase = recommendationData ? "recommendation" : "conversation"
       const res = await fetch("/api/onboard/chat", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
+          phase: currentPhase,
           message: msg,
           conversation_history: conversationHistory.current.slice(0, -1)
         })
@@ -341,19 +351,35 @@ function OnboardFlow() {
       const data = await res.json()
       setTyping(false)
 
-      if (data.ok) {
-        addRuneMessage(data.rune_message)
-
-        if (data.conversation_complete) {
-          setConversationComplete(true)
-          setProfileData(data.profile_data || null)
-          setTimeout(() => {
-            setShowGmail(true)
-            scrollToBottom()
-          }, 1500)
-        }
-      } else {
+      if (!data.ok) {
         addRuneMessage("Sorry, something went wrong. Try sending that again.")
+        return
+      }
+
+      addRuneMessage(data.rune_message)
+
+      if (data.signal === "intent_ready") {
+        const intent = data.intent_data || {}
+        setIntentData(intent)
+
+        if (intent.inbox_preferences?.wants_inbox_curation === false) {
+          setTimeout(() => injectScanResults(null), 500)
+        } else {
+          try {
+            sessionStorage.setItem("rune_onboard_messages", JSON.stringify([
+              ...messages,
+              { id: uid(), role: "user", content: msg, timestamp: Date.now() },
+              { id: uid(), role: "rune", content: data.rune_message, timestamp: Date.now() }
+            ]))
+            sessionStorage.setItem("rune_onboard_intent", JSON.stringify(intent))
+          } catch {}
+          setTimeout(() => {
+            setPhase("gmail_connect")
+            scrollToBottom()
+          }, 1000)
+        }
+      } else if (data.signal === "recommendation_ready") {
+        handleRecommendationSignal(data.recommendation_data)
       }
     } catch {
       setTyping(false)
@@ -364,7 +390,9 @@ function OnboardFlow() {
   }
 
   async function runInboxScan() {
-    setScanning(true)
+    setTyping(true)
+    addRuneMessage("Gmail connected. Reading your inbox now...")
+
     try {
       const res = await fetch("/api/onboard/scan-inbox", {
         method: "POST",
@@ -373,38 +401,91 @@ function OnboardFlow() {
       if (res.status === 401) { router.push("/auth?redirectedFrom=/onboard"); return }
       const scanData = await res.json()
 
+      setTyping(false)
+
       if (scanData.ok) {
-        showTypingThenMessage(
-          `Found ${scanData.newsletters_identified || 0} newsletters in your inbox. Building your recommendation...`,
-          600
-        )
-      }
-
-      const recRes = await fetch("/api/onboard/recommend", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" }
-      })
-      const recData = await recRes.json()
-
-      setScanning(false)
-      if (recData.ok && recData.recommendation) {
-        setRecommendation(recData.recommendation)
-        scrollToBottom()
+        addRuneMessage(`Found ${scanData.relevant_senders || 0} relevant senders in your inbox.`)
+        await injectScanResults(scanData.scan_summary)
       } else {
-        addRuneMessage("Had trouble building the recommendation. Let's try that again.")
+        addRuneMessage("Had trouble scanning your inbox. Let me build your setup without it.")
+        await injectScanResults(null)
       }
     } catch {
-      setScanning(false)
-      addRuneMessage("Inbox scan hit an issue. Try refreshing the page.")
+      setTyping(false)
+      addRuneMessage("Inbox scan hit an issue. Building your setup without inbox data.")
+      await injectScanResults(null)
+    }
+  }
+
+  async function injectScanResults(scanSummary: any) {
+    setPhase("recommendation")
+    setLoading(true)
+    setTyping(true)
+
+    const systemMessage = scanSummary
+      ? `[SYSTEM: Inbox scan complete. Results:\n${JSON.stringify(scanSummary)}\n\nNow generate the user's recommendation. Address them directly. Show them what you'd build based on everything in this conversation plus the inbox results. End with the configuration JSON block.]`
+      : `[SYSTEM: User does not want inbox curation OR inbox scan failed. No inbox data available.\n\nNow generate the user's recommendation. Address them directly. Show them what you'd build based on everything in this conversation. End with the configuration JSON block.]`
+
+    try {
+      const res = await fetch("/api/onboard/chat", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          phase: "recommendation",
+          message: systemMessage,
+          conversation_history: conversationHistory.current
+        })
+      })
+      const data = await res.json()
+      setTyping(false)
+
+      if (data.ok) {
+        addRuneMessage(data.rune_message)
+
+        if (data.signal === "recommendation_ready") {
+          handleRecommendationSignal(data.recommendation_data)
+        }
+      } else {
+        addRuneMessage("Something went wrong generating your recommendation. Try refreshing.")
+      }
+    } catch {
+      setTyping(false)
+      addRuneMessage("Connection issue. Try refreshing the page.")
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  async function handleRecommendationSignal(recData: any) {
+    if (!recData) return
+    setRecommendationData(recData)
+    setPhase("recommendation")
+    scrollToBottom()
+
+    try {
+      await fetch("/api/onboard/recommend", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ recommendation: recData })
+      })
+    } catch {
+      console.error("Failed to store recommendation")
     }
   }
 
   async function handleApprove() {
-    if (!recommendation || approving) return
+    if (!recommendationData || approving) return
     setApproving(true)
 
     try {
-      const config = (recommendation as any).recommended_config || buildConfigFromRecommendation(recommendation)
+      const config = {
+        slot_allocation: recommendationData.slot_allocation,
+        inbox_curation_plan: recommendationData.inbox_curation_plan || null,
+        digest_preferences: {
+          delivery_time: "07:00",
+          timezone: Intl.DateTimeFormat().resolvedOptions().timeZone || "America/New_York"
+        }
+      }
 
       const res = await fetch("/api/onboard/approve", {
         method: "POST",
@@ -414,9 +495,8 @@ function OnboardFlow() {
       const data = await res.json()
 
       if (data.ok) {
-        setApproved(true)
-        showTypingThenMessage("You're all set. Your first brief arrives tomorrow morning. Welcome to Rune.", 800)
-        setTimeout(() => router.push("/dashboard"), 4000)
+        setPhase("approved")
+        try { sessionStorage.removeItem("rune_onboard_messages"); sessionStorage.removeItem("rune_onboard_intent") } catch {}
       } else {
         addRuneMessage("Something went wrong saving your config. Try again.")
       }
@@ -427,34 +507,7 @@ function OnboardFlow() {
     }
   }
 
-  function buildConfigFromRecommendation(rec: Recommendation) {
-    return {
-      modules: {
-        newsletters: {
-          enabled: true,
-          priority_senders: rec.priority_newsletters.map((n) => n.address),
-          deprioritized_senders: [],
-          max_items_in_digest: 5
-        },
-        news: {
-          enabled: !!rec.news_topic,
-          topic_text: rec.news_topic?.text || "",
-          topic_mapping: profileData?.news_topic_suggestion || {}
-        },
-        lessons: {
-          enabled: !!rec.lesson_topic,
-          topic_text: rec.lesson_topic?.text || "",
-          topic_mapping: profileData?.lesson_topic_suggestion || {}
-        }
-      },
-      digest_preferences: {
-        delivery_time: rec.delivery_time || "07:00",
-        timezone: Intl.DateTimeFormat().resolvedOptions().timeZone || "America/New_York"
-      }
-    }
-  }
-
-  const showInput = !conversationComplete && !approved
+  const showInput = phase === "conversation" || (phase === "recommendation" && !approving && recommendationData !== null)
 
   function handleTextareaInput(e: React.ChangeEvent<HTMLTextAreaElement>) {
     setInput(e.target.value)
@@ -466,31 +519,37 @@ function OnboardFlow() {
   return (
     <div className="fixed inset-0 z-40 flex flex-col" style={{ background: "#07070d" }}>
 
-      <div ref={scrollRef} className="flex-1 overflow-y-auto overscroll-contain">
-        <div className="mx-auto max-w-[520px] space-y-5 px-5 pb-8 pt-16">
-          {messages.map((msg) =>
-            msg.role === "rune" ? (
-              <RuneMessage key={msg.id} content={msg.content} />
-            ) : (
-              <UserMessage key={msg.id} content={msg.content} />
-            )
-          )}
-
-          {typing && <TypingIndicator />}
-          {showGmail && !scanning && !recommendation && !approved && <GmailButton />}
-          {scanning && <ScanningIndicator />}
-          {recommendation && !approved && (
-            <RecommendationCard
-              recommendation={recommendation}
-              onApprove={handleApprove}
-              approving={approving}
-            />
-          )}
+      {phase === "approved" ? (
+        <div className="flex-1 flex items-center justify-center">
+          <CompletionScreen />
         </div>
-      </div>
+      ) : (
+        <div ref={scrollRef} className="flex-1 overflow-y-auto overscroll-contain">
+          <div className="mx-auto max-w-[520px] space-y-5 px-5 pb-8 pt-16">
+            {messages.map((msg) =>
+              msg.role === "rune" ? (
+                <RuneMessage key={msg.id} content={msg.content} />
+              ) : (
+                <UserMessage key={msg.id} content={msg.content} />
+              )
+            )}
+
+            {typing && <TypingIndicator />}
+            {phase === "gmail_connect" && !loading && <GmailButton />}
+            {phase === "scanning" && typing && <ScanningIndicator />}
+            {recommendationData && phase === "recommendation" && (
+              <RecommendationCard
+                data={recommendationData}
+                onApprove={handleApprove}
+                approving={approving}
+              />
+            )}
+          </div>
+        </div>
+      )}
 
       {showInput && (
-        <div className="relative px-5 pb-6 pt-3">
+        <div className="relative px-5 pb-[max(1.5rem,env(safe-area-inset-bottom))] pt-3">
           <div className="absolute top-0 left-0 right-0 h-px bg-gradient-to-r from-transparent via-white/[0.06] to-transparent" />
           <div className="mx-auto max-w-[520px]">
             <div className="flex items-center gap-2 rounded-2xl bg-[#12121a] ring-1 ring-white/[0.08] px-4 py-3 focus-within:ring-white/[0.15] transition-all">

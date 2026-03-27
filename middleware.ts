@@ -44,10 +44,10 @@ export async function middleware(req: NextRequest) {
     } = await supabase.auth.getSession()
     if (session) {
       const redirectedFrom = req.nextUrl.searchParams.get("redirectedFrom")
-      if (redirectedFrom?.startsWith("/onboard")) {
+      if (redirectedFrom) {
         return NextResponse.redirect(new URL(redirectedFrom, req.url))
       }
-      return NextResponse.redirect(new URL("/dashboard", req.url))
+      return NextResponse.redirect(new URL("/onboard", req.url))
     }
   }
 

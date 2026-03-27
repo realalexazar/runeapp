@@ -2,13 +2,6 @@ import { NextResponse } from "next/server"
 import { getSupabaseServerClient } from "@/lib/supabase/server"
 import { supabaseServiceRole } from "@/lib/supabase/service"
 
-/**
- * POST /api/onboard/approve
- *
- * Finalizes onboarding by persisting the user's approved configuration
- * into all necessary database records (digest_configs, news/lesson topics,
- * newsletter selections, inbox_analysis dispositions).
- */
 export async function POST(req: Request) {
   const supabase = await getSupabaseServerClient()
   const { data: { user }, error: userError } = await supabase.auth.getUser()
@@ -22,18 +15,22 @@ export async function POST(req: Request) {
     const body = await req.json()
     const { config } = body
 
-    if (!config || !config.modules || !config.digest_preferences) {
+    if (!config || !Array.isArray(config.slot_allocation)) {
       return NextResponse.json({
         ok: false,
-        error: "Invalid request body. Expected 'config' with 'modules' and 'digest_preferences'."
+        error: "Invalid config: missing slot_allocation array"
       }, { status: 400 })
     }
 
-    const { modules, digest_preferences } = config
+    const slots = config.slot_allocation as Array<Record<string, any>>
     const now = new Date().toISOString()
-    const createdIds: Record<string, string> = {}
+    const createdIds: Record<string, string | number> = {}
 
-    // 1. Store approved_config and mark onboarding complete
+    const emailSlots = slots.filter((s) => s.type === "email")
+    const newsSlots = slots.filter((s) => s.type === "news")
+    const lessonSlots = slots.filter((s) => s.type === "lesson")
+
+    // 1. Store approved config + mark complete
     const { error: profileErr } = await supabaseServiceRole
       .from("user_profiles")
       .update({
@@ -50,174 +47,133 @@ export async function POST(req: Request) {
     }
 
     // 2. Upsert digest_configs
-    const moduleFlags = {
-      enable_newsletter_digest: !!modules.newsletters?.enabled,
-      enable_daily_news_topics: !!modules.news?.enabled,
-      enable_daily_lessons: !!modules.lessons?.enabled,
-    }
-
-    const { data: digestConfig, error: digestErr } = await supabaseServiceRole
+    const preferences = config.digest_preferences || {}
+    const { error: digestErr } = await supabaseServiceRole
       .from("digest_configs")
       .upsert({
         user_id: user.id,
         cadence: "daily",
-        send_time: digest_preferences.delivery_time,
-        timezone: digest_preferences.timezone,
+        send_time: [preferences.delivery_time || "07:00"],
+        timezone: preferences.timezone || "America/New_York",
         style: "morning-brief",
         rune_name: null,
-        module_flags: moduleFlags,
+        module_flags: {
+          enable_newsletter_digest: emailSlots.length > 0,
+          enable_daily_news_topics: newsSlots.length > 0,
+          enable_daily_lessons: lessonSlots.length > 0,
+        },
         updated_at: now,
-      }, {
-        onConflict: "user_id",
-        ignoreDuplicates: false,
-      })
-      .select("id")
-      .single()
+      }, { onConflict: "user_id", ignoreDuplicates: false })
 
     if (digestErr) {
       console.error("Failed to upsert digest_configs:", digestErr)
       return NextResponse.json({ ok: false, error: digestErr.message }, { status: 500 })
     }
-    createdIds.digest_config_id = digestConfig.id
 
-    // 3. News module
-    if (modules.news?.enabled) {
-      const { error: deactivateNewsErr } = await supabaseServiceRole
+    // 3. News topics — one record per news slot
+    if (newsSlots.length > 0) {
+      await supabaseServiceRole
         .from("user_news_topics")
         .update({ active: false, updated_at: now })
         .eq("user_id", user.id)
         .eq("active", true)
 
-      if (deactivateNewsErr) {
-        console.error("Failed to deactivate existing news topics:", deactivateNewsErr)
-        return NextResponse.json({ ok: false, error: deactivateNewsErr.message }, { status: 500 })
-      }
+      for (const slot of newsSlots) {
+        const { data: newsTopic, error: newsErr } = await supabaseServiceRole
+          .from("user_news_topics")
+          .insert({
+            user_id: user.id,
+            topic_text: slot.focus,
+            topic_raw_text: slot.focus,
+            timeframe: "24h",
+            topic_mapping_json: {
+              normalized_topic: slot.focus,
+              scope_summary: slot.scope_summary || slot.focus,
+              retrieval_queries: slot.retrieval_queries || [slot.focus],
+              required_terms: slot.required_terms || [],
+              retrieval_hint: slot.focus,
+            },
+            active: true,
+          })
+          .select("id")
+          .single()
 
-      const { data: newsTopic, error: newsInsertErr } = await supabaseServiceRole
-        .from("user_news_topics")
-        .insert({
-          user_id: user.id,
-          topic_text: modules.news.topic_text,
-          topic_raw_text: modules.news.topic_text,
-          timeframe: "24h",
-          topic_mapping_json: modules.news.topic_mapping,
-          active: true,
-        })
-        .select("id")
-        .single()
-
-      if (newsInsertErr) {
-        console.error("Failed to insert news topic:", newsInsertErr)
-        return NextResponse.json({ ok: false, error: newsInsertErr.message }, { status: 500 })
+        if (newsErr) {
+          console.error(`Failed to insert news topic "${slot.focus}":`, newsErr)
+        } else if (newsTopic) {
+          createdIds[`news_topic_slot_${slot.slot}`] = newsTopic.id
+        }
       }
-      createdIds.news_topic_id = newsTopic.id
     }
 
-    // 4. Lessons module
-    if (modules.lessons?.enabled) {
-      const { error: deactivateLessonsErr } = await supabaseServiceRole
+    // 4. Lesson topics — one record per lesson slot
+    if (lessonSlots.length > 0) {
+      await supabaseServiceRole
         .from("user_lesson_topics")
         .update({ active: false, updated_at: now })
         .eq("user_id", user.id)
         .eq("active", true)
 
-      if (deactivateLessonsErr) {
-        console.error("Failed to deactivate existing lesson topics:", deactivateLessonsErr)
-        return NextResponse.json({ ok: false, error: deactivateLessonsErr.message }, { status: 500 })
-      }
+      for (const slot of lessonSlots) {
+        const { data: lessonTopic, error: lessonErr } = await supabaseServiceRole
+          .from("user_lesson_topics")
+          .insert({
+            user_id: user.id,
+            topic_text: slot.focus,
+            topic_raw_text: slot.focus,
+            curriculum_goal: slot.curriculum_goal || null,
+            starting_level: slot.starting_level || "beginner",
+            topic_mapping_json: {
+              normalized_topic: slot.focus,
+              scope_summary: slot.curriculum_goal || slot.focus,
+              starting_level: slot.starting_level || "beginner",
+            },
+            active: true,
+          })
+          .select("id")
+          .single()
 
-      const { data: lessonTopic, error: lessonInsertErr } = await supabaseServiceRole
-        .from("user_lesson_topics")
-        .insert({
-          user_id: user.id,
-          topic_text: modules.lessons.topic_text,
-          topic_raw_text: modules.lessons.topic_text,
-          curriculum_goal: modules.lessons.topic_mapping?.curriculum_plan?.completion_signal ?? null,
-          starting_level: "beginner",
-          topic_mapping_json: modules.lessons.topic_mapping,
-          active: true,
-        })
-        .select("id")
-        .single()
-
-      if (lessonInsertErr) {
-        console.error("Failed to insert lesson topic:", lessonInsertErr)
-        return NextResponse.json({ ok: false, error: lessonInsertErr.message }, { status: 500 })
+        if (lessonErr) {
+          console.error(`Failed to insert lesson topic "${slot.focus}":`, lessonErr)
+        } else if (lessonTopic) {
+          createdIds[`lesson_topic_slot_${slot.slot}`] = lessonTopic.id
+        }
       }
-      createdIds.lesson_topic_id = lessonTopic.id
     }
 
-    // 5. Newsletters module
-    if (modules.newsletters?.enabled) {
-      const prioritySenders: string[] = modules.newsletters.priority_senders || []
-      const deprioritizedSenders: string[] = modules.newsletters.deprioritized_senders || []
+    // 5. Email / inbox curation
+    if (emailSlots.length > 0) {
+      const allPrioritySenders = emailSlots.flatMap((s) => s.priority_senders || [])
+      const inboxPlan = config.inbox_curation_plan || {}
+      const planSenders = inboxPlan.priority_senders || []
+      const combined = [...new Set([...allPrioritySenders, ...planSenders])]
 
-      if (prioritySenders.length > 0) {
-        const upserts = prioritySenders.map((sender: string) => ({
+      if (combined.length > 0) {
+        const upserts = combined.map((sender: string) => ({
           user_id: user.id,
           sender_key: sender,
           selected: true,
           updated_at: now,
         }))
 
-        const { error: selErr } = await supabaseServiceRole
+        await supabaseServiceRole
           .from("user_newsletter_selections")
-          .upsert(upserts, {
-            onConflict: "user_id,sender_key",
-            ignoreDuplicates: false,
-          })
+          .upsert(upserts, { onConflict: "user_id,sender_key", ignoreDuplicates: false })
 
-        if (selErr) {
-          console.error("Failed to upsert newsletter selections:", selErr)
-          return NextResponse.json({ ok: false, error: selErr.message }, { status: 500 })
-        }
-
-        const { error: priorityErr } = await supabaseServiceRole
+        await supabaseServiceRole
           .from("inbox_analysis")
-          .update({ disposition: "priority", updated_at: now })
+          .update({ disposition: "priority" })
           .eq("user_id", user.id)
-          .in("sender_address", prioritySenders)
+          .in("sender_address", combined)
 
-        if (priorityErr) {
-          console.error("Failed to update inbox_analysis priority:", priorityErr)
-          return NextResponse.json({ ok: false, error: priorityErr.message }, { status: 500 })
-        }
+        createdIds.newsletter_selections_count = combined.length
       }
-
-      if (deprioritizedSenders.length > 0) {
-        const { error: excludeErr } = await supabaseServiceRole
-          .from("inbox_analysis")
-          .update({ disposition: "exclude", updated_at: now })
-          .eq("user_id", user.id)
-          .in("sender_address", deprioritizedSenders)
-
-        if (excludeErr) {
-          console.error("Failed to update inbox_analysis exclude:", excludeErr)
-          return NextResponse.json({ ok: false, error: excludeErr.message }, { status: 500 })
-        }
-      }
-
-      createdIds.newsletter_selections_count = String(prioritySenders.length)
     }
 
-    return NextResponse.json({
-      ok: true,
-      created_ids: createdIds,
-    })
+    return NextResponse.json({ ok: true, created_ids: createdIds })
 
   } catch (e: any) {
     console.error("Error approving onboarding config:", e)
-
-    if (e instanceof SyntaxError || e.message?.includes("JSON")) {
-      return NextResponse.json({
-        ok: false,
-        error: "Invalid JSON in request body."
-      }, { status: 400 })
-    }
-
-    return NextResponse.json({
-      ok: false,
-      error: String(e.message || e)
-    }, { status: 500 })
+    return NextResponse.json({ ok: false, error: String(e.message || e) }, { status: 500 })
   }
 }

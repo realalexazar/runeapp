@@ -7,7 +7,7 @@ import { env } from '@/lib/env'
 export async function GET(request: Request) {
   const url = new URL(request.url)
   const code = url.searchParams.get('code')
-  const next = url.searchParams.get('next') ?? '/dashboard'
+  const next = url.searchParams.get('next') ?? '/onboard'
 
   if (code) {
     const cookieStore = await cookies()
