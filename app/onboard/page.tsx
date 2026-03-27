@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useEffect, useRef, useCallback, Suspense } from "react"
+import { useState, useEffect, useRef, useCallback, Suspense, useMemo } from "react"
 import { useSearchParams, useRouter } from "next/navigation"
 import { ArrowUp, Loader2, Check, ChevronDown, ChevronUp, Mail, BookOpen, Newspaper } from "lucide-react"
 
@@ -154,6 +154,46 @@ function CompletionScreen() {
   )
 }
 
+const UI_GREETINGS = [
+  "Hey, I'm Rune.",
+  "Hi, I'm Rune.",
+  "Rune here.",
+  "Hey there, I'm Rune.",
+  "Welcome. I'm Rune.",
+]
+
+function GreetingScreen({
+  greeting,
+  showPrompt,
+}: {
+  greeting: string
+  showPrompt: boolean
+}) {
+  return (
+    <div className="flex min-h-full items-center justify-center px-6 pb-28 pt-32 text-center">
+      <div className="max-w-[320px]">
+        <div
+          className="text-[34px] font-semibold leading-none text-white sm:text-[40px]"
+          style={{
+            fontFamily: "var(--font-serif)",
+            textShadow: "0 0 22px rgba(255,255,255,0.18), 0 0 44px rgba(180,220,255,0.08)",
+          }}
+        >
+          {greeting}
+        </div>
+        <div
+          className={[
+            "mt-5 text-[14px] tracking-[0.08em] text-white/45 transition-all duration-500",
+            showPrompt ? "opacity-100 translate-y-0" : "opacity-0 translate-y-2",
+          ].join(" ")}
+        >
+          Click chat to begin
+        </div>
+      </div>
+    </div>
+  )
+}
+
 function RecommendationCard({
   data,
   onApprove,
@@ -255,11 +295,18 @@ function OnboardFlow() {
   const [intentData, setIntentData] = useState<IntentData | null>(null)
   const [recommendationData, setRecommendationData] = useState<RecommendationData | null>(null)
   const [approving, setApproving] = useState(false)
+  const [showGreetingPrompt, setShowGreetingPrompt] = useState(false)
+  const [conversationStarted, setConversationStarted] = useState(false)
 
   const conversationHistory = useRef<Array<{ role: "user" | "assistant"; content: string }>>([])
   const scrollRef = useRef<HTMLDivElement>(null)
   const inputRef = useRef<HTMLTextAreaElement>(null)
   const initDone = useRef(false)
+  const openingRequested = useRef(false)
+  const greeting = useMemo(
+    () => UI_GREETINGS[Math.floor(Math.random() * UI_GREETINGS.length)],
+    []
+  )
 
   const scrollToBottom = useCallback(() => {
     setTimeout(() => scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: "smooth" }), 100)
@@ -292,16 +339,21 @@ function OnboardFlow() {
         const savedIntent = sessionStorage.getItem("rune_onboard_intent")
         if (savedIntent) setIntentData(JSON.parse(savedIntent))
       } catch {}
+      setConversationStarted(true)
       setPhase("scanning")
       runInboxScan()
       return
     }
 
-    fetchOpening()
+    const timer = window.setTimeout(() => setShowGreetingPrompt(true), 600)
+    return () => window.clearTimeout(timer)
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
   async function fetchOpening() {
+    if (openingRequested.current) return
+    openingRequested.current = true
+    setConversationStarted(true)
     setTyping(true)
     try {
       const res = await fetch("/api/onboard/chat", {
@@ -321,6 +373,12 @@ function OnboardFlow() {
       setTyping(false)
       addRuneMessage("Hey — something went wrong on my end. Refresh and let's try again.")
     }
+  }
+
+  function beginConversation() {
+    if (phase !== "conversation" || conversationStarted || messages.length > 0) return
+    setShowGreetingPrompt(false)
+    fetchOpening()
   }
 
   async function handleSend() {
@@ -508,6 +566,7 @@ function OnboardFlow() {
   }
 
   const showInput = phase === "conversation" || (phase === "recommendation" && !approving && recommendationData !== null)
+  const showGreeting = phase === "conversation" && !conversationStarted && messages.length === 0
 
   function handleTextareaInput(e: React.ChangeEvent<HTMLTextAreaElement>) {
     setInput(e.target.value)
@@ -517,52 +576,61 @@ function OnboardFlow() {
   }
 
   return (
-    <div className="fixed inset-0 z-40 flex flex-col" style={{ background: "#07070d" }}>
+    <div className="fixed inset-0 z-40 h-[100dvh]" style={{ background: "#07070d" }}>
 
       {phase === "approved" ? (
-        <div className="flex-1 flex items-center justify-center">
+        <div className="flex h-full items-center justify-center">
           <CompletionScreen />
         </div>
       ) : (
-        <div ref={scrollRef} className="flex-1 overflow-y-auto overscroll-contain">
-          <div className="mx-auto max-w-[520px] space-y-5 px-5 pb-8 pt-16">
-            {messages.map((msg) =>
-              msg.role === "rune" ? (
-                <RuneMessage key={msg.id} content={msg.content} />
-              ) : (
-                <UserMessage key={msg.id} content={msg.content} />
-              )
-            )}
+        <div
+          ref={scrollRef}
+          className="absolute inset-x-0 top-0 bottom-[88px] overflow-y-auto overscroll-contain"
+        >
+          <div className="mx-auto max-w-[560px] px-5 pb-10 pt-28 sm:pt-20">
+            {showGreeting ? (
+              <GreetingScreen greeting={greeting} showPrompt={showGreetingPrompt} />
+            ) : (
+              <div className="space-y-5">
+                {messages.map((msg) =>
+                  msg.role === "rune" ? (
+                    <RuneMessage key={msg.id} content={msg.content} />
+                  ) : (
+                    <UserMessage key={msg.id} content={msg.content} />
+                  )
+                )}
 
-            {typing && <TypingIndicator />}
-            {phase === "gmail_connect" && !loading && <GmailButton />}
-            {phase === "scanning" && typing && <ScanningIndicator />}
-            {recommendationData && phase === "recommendation" && (
-              <RecommendationCard
-                data={recommendationData}
-                onApprove={handleApprove}
-                approving={approving}
-              />
+                {typing && <TypingIndicator />}
+                {phase === "gmail_connect" && !loading && <GmailButton />}
+                {phase === "scanning" && typing && <ScanningIndicator />}
+                {recommendationData && phase === "recommendation" && (
+                  <RecommendationCard
+                    data={recommendationData}
+                    onApprove={handleApprove}
+                    approving={approving}
+                  />
+                )}
+              </div>
             )}
           </div>
         </div>
       )}
 
       {showInput && (
-        <div className="relative px-5 pb-[max(1.5rem,env(safe-area-inset-bottom))] pt-3">
+        <div className="absolute inset-x-0 bottom-0 px-3 pb-[max(0.5rem,env(safe-area-inset-bottom))] pt-2 sm:px-5">
           <div className="absolute top-0 left-0 right-0 h-px bg-gradient-to-r from-transparent via-white/[0.06] to-transparent" />
-          <div className="mx-auto max-w-[520px]">
-            <div className="flex items-center gap-2 rounded-2xl bg-[#12121a] ring-1 ring-white/[0.08] px-4 py-3 focus-within:ring-white/[0.15] transition-all">
+          <div className="mx-auto max-w-[460px]">
+            <div className="flex items-center gap-2 rounded-2xl bg-[#12121a] ring-1 ring-white/[0.08] px-3 py-2.5 sm:px-4 sm:py-3 focus-within:ring-white/[0.15] transition-all">
               <textarea
                 ref={inputRef}
                 value={input}
+                onFocus={beginConversation}
                 onChange={handleTextareaInput}
                 onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); handleSend() } }}
                 placeholder="Message Rune..."
                 disabled={loading}
                 rows={1}
-                className="flex-1 resize-none bg-transparent text-[15px] text-white placeholder-white/25 outline-none disabled:opacity-50 leading-relaxed max-h-[120px]"
-                autoFocus
+                className="flex-1 resize-none bg-transparent text-[14px] sm:text-[15px] text-white placeholder-white/25 outline-none disabled:opacity-50 leading-relaxed max-h-[100px]"
               />
               <button
                 onClick={handleSend}
