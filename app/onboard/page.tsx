@@ -579,7 +579,7 @@ function OnboardFlow() {
   }
 
   return (
-    <div className="h-[100dvh] flex flex-col" style={{ background: "#07070d" }}>
+    <div className="fixed inset-0 z-40 h-[100dvh] flex flex-col" style={{ background: "#07070d" }}>
       {/* Energy surge overlay */}
       {showSurge && (
         <div className="pointer-events-none fixed inset-0 z-[60]">
@@ -596,7 +596,7 @@ function OnboardFlow() {
       ) : (
         <>
           <div ref={scrollRef} className="flex-1 overflow-y-auto overscroll-contain">
-            <div className="mx-auto max-w-[560px] px-4 pb-4 pt-6 sm:px-5">
+            <div className="mx-auto max-w-[560px] px-4 pb-4 pt-20 sm:px-5">
               {showGreeting ? (
                 <GreetingScreen greeting={greeting} showPrompt={showGreetingPrompt} />
               ) : (
