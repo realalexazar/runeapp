@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server"
 import { getSupabaseServerClient } from "@/lib/supabase/server"
 import { supabaseServiceRole } from "@/lib/supabase/service"
+import { generateCurriculumPlan } from "@/lib/onboard/generate-curriculum"
 
 export async function POST(req: Request) {
   const supabase = await getSupabaseServerClient()
@@ -115,18 +116,36 @@ export async function POST(req: Request) {
         .eq("active", true)
 
       for (const slot of lessonSlots) {
+        const startingLevel = slot.starting_level || "beginner"
+        const curriculumGoal = slot.curriculum_goal || null
+
+        const curriculumPlan = await generateCurriculumPlan({
+          topic: slot.focus,
+          startingLevel,
+          curriculumGoal,
+          scopeSummary: slot.scope_summary || null,
+        })
+
         const { data: lessonTopic, error: lessonErr } = await supabaseServiceRole
           .from("user_lesson_topics")
           .insert({
             user_id: user.id,
             topic_text: slot.focus,
             topic_raw_text: slot.focus,
-            curriculum_goal: slot.curriculum_goal || null,
-            starting_level: slot.starting_level || "beginner",
+            curriculum_goal: curriculumGoal,
+            starting_level: startingLevel,
             topic_mapping_json: {
               normalized_topic: slot.focus,
-              scope_summary: slot.curriculum_goal || slot.focus,
-              starting_level: slot.starting_level || "beginner",
+              scope_summary: curriculumGoal || slot.focus,
+              starting_level: startingLevel,
+              curriculum_plan: curriculumPlan,
+              lesson_state: {
+                status: "active",
+                next_day: 1,
+                last_generated_date: null,
+                paused_at: null,
+                completed_at: null,
+              },
             },
             active: true,
           })
