@@ -17,6 +17,9 @@ export async function GET(req: Request) {
   }
 
   try {
+    const url = new URL(req.url)
+    const force = url.searchParams.get("force") === "true"
+
     const now = new Date()
     const digestDate = now.toISOString().slice(0, 10)
     const { data: configs, error } = await supabaseServiceRole
@@ -30,12 +33,13 @@ export async function GET(req: Request) {
     const results: Array<Record<string, any>> = []
 
     for (const config of configs || []) {
-      const sendTimes = Array.isArray(config.send_time) ? config.send_time : []
-      const shouldRun = sendTimes.some((sendTime: string) =>
-        typeof sendTime === "string" && isWithinSendWindow(now, sendTime, config.timezone || "UTC")
-      )
-
-      if (!shouldRun) continue
+      if (!force) {
+        const sendTimes = Array.isArray(config.send_time) ? config.send_time : []
+        const shouldRun = sendTimes.some((sendTime: string) =>
+          typeof sendTime === "string" && isWithinSendWindow(now, sendTime, config.timezone || "UTC")
+        )
+        if (!shouldRun) continue
+      }
 
       const existingSent = await supabaseServiceRole
         .from("digests")
