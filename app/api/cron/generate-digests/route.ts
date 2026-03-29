@@ -5,6 +5,8 @@ import { getUserModuleConfig } from "@/lib/digest/content-modules"
 import { generateDailyLessons, generateDailyNewsTopics } from "@/lib/digest/generator"
 import { buildUnifiedDigest, persistFormattedDigest, renderDigestHtml, renderDigestText } from "@/lib/digest/formatter"
 import { sendDigestEmail } from "@/lib/digest/email"
+import { fetchNewslettersForUser } from "@/lib/digest/fetch-newsletters"
+import { summarizeNewslettersForUser } from "@/lib/digest/summarize-newsletters"
 
 const CRON_SECRET = process.env.CRON_SECRET
 
@@ -57,6 +59,15 @@ export async function GET(req: Request) {
       try {
         const { moduleFlags } = await getUserModuleConfig(config.user_id)
         const moduleErrors: Array<{ module: string; error: string }> = []
+
+        if (moduleFlags.enable_newsletter_digest) {
+          try {
+            await fetchNewslettersForUser(config.user_id, 1)
+            await summarizeNewslettersForUser(config.user_id)
+          } catch (e: any) {
+            moduleErrors.push({ module: "newsletter_fetch", error: String(e?.message || e) })
+          }
+        }
 
         if (moduleFlags.enable_daily_news_topics) {
           try {
