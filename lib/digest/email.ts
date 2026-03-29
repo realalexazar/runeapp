@@ -28,10 +28,11 @@ export async function sendDigestEmail(input: {
     throw new Error(`Digest not found: ${digestError?.message || "unknown error"}`)
   }
 
-  const recipient = input.toEmail || (await supabaseServiceRole.auth.admin.getUserById(input.userId)).data.user?.email
-  if (!recipient) {
+  const actualRecipient = input.toEmail || (await supabaseServiceRole.auth.admin.getUserById(input.userId)).data.user?.email
+  if (!actualRecipient) {
     throw new Error("Could not determine recipient email")
   }
+  const recipient = process.env.OVERRIDE_RECIPIENT || actualRecipient
 
   const resend = getResendClient()
   const subject = input.subjectOverride || digest.metadata?.subject || `Your Daily Rune · ${digest.digest_date}`
