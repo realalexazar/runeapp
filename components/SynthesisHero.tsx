@@ -280,15 +280,18 @@ function animateElement(el: HTMLDivElement, vw: number, vh: number) {
 }
 
 const TAGLINES = [
-  'Intelligence, distilled at dawn.',
   'The signal beneath the noise.',
   'What matters, before it matters.',
   'Your world, briefed daily.',
   'Clarity, delivered every morning.',
+  'Your unfair advantage.',
+  'Everything you need, nothing you don\'t.',
+  'Your mornign edge',
+  'Your world, curated'
 ]
 
 function RotatingTagline() {
-  const [index, setIndex] = useState(0)
+  const [index, setIndex] = useState(() => Math.floor(Math.random() * TAGLINES.length))
   const spanRef = useRef<HTMLSpanElement>(null)
 
   useEffect(() => {
@@ -299,7 +302,11 @@ function RotatingTagline() {
         duration: 0.6,
         ease: 'power1.in',
         onComplete: () => {
-          setIndex((prev) => (prev + 1) % TAGLINES.length)
+          setIndex((prev) => {
+            let next: number
+            do { next = Math.floor(Math.random() * TAGLINES.length) } while (next === prev && TAGLINES.length > 1)
+            return next
+          })
           gsap.to(spanRef.current, { opacity: 1, duration: 0.8, ease: 'power1.out' })
         },
       })

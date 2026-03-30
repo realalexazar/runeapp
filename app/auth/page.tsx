@@ -1,73 +1,17 @@
-"use client";
-import { useState } from "react";
-import { getSupabaseBrowserClient } from "@/lib/supabase/client";
+"use client"
+import { useEffect } from "react"
+import { useRouter } from "next/navigation"
 
 export default function Auth() {
-  const [email, setEmail] = useState("");
-  const [password, setPassword] = useState("");
-  const supabase = getSupabaseBrowserClient();
+  const router = useRouter()
 
-  async function handleSignUp() {
-    const { data, error } = await supabase.auth.signUp({
-      email,
-      password,
-    });
-
-    if (error) {
-      console.error("Error:", error.message);
-      return;
-    }
-
-    window.location.href = "/onboard";
-  }
-
-  async function handleSignIn() {
-    const { data, error } = await supabase.auth.signInWithPassword({
-      email,
-      password,
-    });
-
-    if (error) {
-      console.error("Error:", error.message);
-      return;
-    }
-
-    window.location.href = "/onboard";
-  }
-
-  async function handleGoogle() {
-    await supabase.auth.signInWithOAuth({
-      provider: "google",
-      options: {
-        redirectTo: `${location.origin}/auth/callback?next=/onboard`,
-      },
-    });
-  }
+  useEffect(() => {
+    router.replace("/")
+  }, [router])
 
   return (
-    <div className="flex flex-col items-center justify-center min-h-screen">
-      <h1 className="text-2xl font-bold mb-4">Login / Register</h1>
-      <input
-        type="email"
-        placeholder="Email"
-        onChange={(e) => setEmail(e.target.value)}
-        className="mb-2 border p-2 text-[16px]"
-      />
-      <input
-        type="password"
-        placeholder="Password"
-        onChange={(e) => setPassword(e.target.value)}
-        className="mb-2 border p-2 text-[16px]"
-      />
-      <button onClick={handleSignIn} className="bg-blue-500 text-white p-2">
-        Login
-      </button>
-      <button onClick={handleSignUp} className="bg-green-500 text-white p-2 mt-2">
-        Register
-      </button>
-      <button onClick={handleGoogle} className="bg-red-500 text-white p-2 mt-4">
-        Continue with Google
-      </button>
+    <div className="flex min-h-screen items-center justify-center">
+      <div className="h-5 w-5 rounded-full border-2 border-white/10 border-t-white/40 animate-spin" />
     </div>
-  );
+  )
 }

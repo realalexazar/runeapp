@@ -19,6 +19,7 @@ export default function AuthDialog({ open, onOpenChange, initialMode = "signup" 
   const [password, setPassword] = useState("")
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [confirmationSent, setConfirmationSent] = useState(false)
   const supabase = getSupabaseBrowserClient()
 
   async function handleEmailAuth() {
@@ -26,8 +27,13 @@ export default function AuthDialog({ open, onOpenChange, initialMode = "signup" 
     setError(null)
     try {
       if (mode === "signup") {
-        const { error } = await supabase.auth.signUp({ email, password })
+        const { data, error } = await supabase.auth.signUp({ email, password })
         if (error) throw error
+        if (!data.session) {
+          setConfirmationSent(true)
+          setLoading(false)
+          return
+        }
       } else {
         const { error } = await supabase.auth.signInWithPassword({ email, password })
         if (error) throw error
@@ -86,43 +92,59 @@ export default function AuthDialog({ open, onOpenChange, initialMode = "signup" 
             </Button>
           </div>
 
-          <div className="space-y-3">
-            <div className="space-y-2">
-              <input
-                type="email"
-                placeholder="Email"
-                className="w-full rounded-md border border-white/15 bg-white/5 p-3 text-[16px] text-white placeholder-white/40 outline-none focus:border-white/30"
-                onChange={(e) => setEmail(e.target.value)}
-              />
-              <input
-                type="password"
-                placeholder="Password"
-                className="w-full rounded-md border border-white/15 bg-white/5 p-3 text-[16px] text-white placeholder-white/40 outline-none focus:border-white/30"
-                onChange={(e) => setPassword(e.target.value)}
-              />
+          {confirmationSent ? (
+            <div className="space-y-3 text-center py-4">
+              <p className="text-[15px] text-white/80">Check your email</p>
+              <p className="text-[13px] text-white/45 leading-relaxed">
+                We sent a confirmation link to <span className="text-white/70">{email}</span>. Click it to activate your account, then come back here to log in.
+              </p>
+              <Button
+                variant="outline"
+                className="mt-2 bg-white/5 border-white/15 text-white/60 hover:bg-white/10"
+                onClick={() => { setConfirmationSent(false); setMode("login") }}
+              >
+                Back to login
+              </Button>
             </div>
+          ) : (
+            <div className="space-y-3">
+              <div className="space-y-2">
+                <input
+                  type="email"
+                  placeholder="Email"
+                  className="w-full rounded-md border border-white/15 bg-white/5 p-3 text-[16px] text-white placeholder-white/40 outline-none focus:border-white/30"
+                  onChange={(e) => setEmail(e.target.value)}
+                />
+                <input
+                  type="password"
+                  placeholder="Password"
+                  className="w-full rounded-md border border-white/15 bg-white/5 p-3 text-[16px] text-white placeholder-white/40 outline-none focus:border-white/30"
+                  onChange={(e) => setPassword(e.target.value)}
+                />
+              </div>
 
-            {error && <p className="text-sm text-red-400">{error}</p>}
+              {error && <p className="text-sm text-red-400">{error}</p>}
 
-            <Button 
-              variant="outline" 
-              className="w-full bg-white/10 border-white/20 text-white hover:bg-white/15" 
-              disabled={loading} 
-              onClick={handleEmailAuth}
-            >
-              {loading ? "Please wait..." : mode === "signup" ? "Create account" : "Login"}
-            </Button>
+              <Button 
+                variant="outline" 
+                className="w-full bg-white/10 border-white/20 text-white hover:bg-white/15" 
+                disabled={loading} 
+                onClick={handleEmailAuth}
+              >
+                {loading ? "Please wait..." : mode === "signup" ? "Create account" : "Login"}
+              </Button>
 
-            <div className="flex items-center gap-3">
-              <div className="h-px w-full bg-white/10" />
-              <span className="text-xs text-white/50">or</span>
-              <div className="h-px w-full bg-white/10" />
+              <div className="flex items-center gap-3">
+                <div className="h-px w-full bg-white/10" />
+                <span className="text-xs text-white/50">or</span>
+                <div className="h-px w-full bg-white/10" />
+              </div>
+
+              <Button variant="outline" className="w-full bg-white/5 text-white hover:bg-white/10" onClick={handleGoogle}>
+                Continue with Google
+              </Button>
             </div>
-
-            <Button variant="outline" className="w-full bg-white/5 text-white hover:bg-white/10" onClick={handleGoogle}>
-              Continue with Google
-            </Button>
-          </div>
+          )}
         </Dialog.Content>
       </Dialog.Portal>
     </Dialog.Root>
