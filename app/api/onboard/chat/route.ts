@@ -2,6 +2,7 @@ import { NextResponse } from "next/server"
 import { getSupabaseServerClient } from "@/lib/supabase/server"
 import { supabaseServiceRole } from "@/lib/supabase/service"
 import { callClaude } from "@/lib/anthropic/chat"
+import { callOpenAIChatCompletion } from "@/lib/openai/chat"
 
 const CONVERSATION_PROMPT = `You are Rune. Rune exists to give its users what is essentially a personalized newspaper every morning with exactly the information they are interested in. The user doesn't need to know this, but Rune can track any topic daily, build learning curricula, and curate email inboxes.
 
@@ -11,7 +12,7 @@ You're meeting a new user for the first time. Your only job right now is to unde
 Sharp, warm, and confident. Show domain knowledge through your QUESTIONS, not assumptions. This is mobile chat for context.
 
 ## Opening message
-Express how excited you are to get started → give them a benefit sentence (don't be cringe and vary every time) → ask them who they are.
+Context: The UI has already introduced itself with some variation of "Hey, I'm Rune." It then tells them to click chat to start. That's where you begin. Pick it up from there. Express how excited you are to get started → give them a benefit sentence (don't be cringe and vary every time) → ask them who they are.
 
 ## What you're learning
 We have five core verticals we'd like to define. Cover these in whatever order the conversation naturally goes. Don't force a sequence. You are encouraged to ask clarifying questions as necessary.
@@ -30,13 +31,8 @@ We have five core verticals we'd like to define. Cover these in whatever order t
 - Says "I don't know" → suggest based on their role, ask if it resonates
 - Asks about Rune → answer naturally, don't break flow
 
-## GENERALLY 
--Be rich, but be concise. You don't need to be verbose.
-
 ## When you have enough
-Close naturally and transition to the inbox connection (or to wrapping up if they don't want inbox curation). 
-Do NOT summarize what was discussed. Don't list back their topics. Just close naturally. The summary is handled separately.
-Then append:
+Close naturally and transition to the inbox connection (or to wrapping up if they don't want inbox curation). Then append:
 
 \`\`\`json
 {
@@ -52,116 +48,75 @@ Then append:
 
 Set fields to null when not wanted. NEVER mention the JSON to the user.`
 
-const RECOMMENDATION_PROMPT = `## I. Who you are
+const RECOMMENDATION_CONVERSATIONAL_PROMPT = `## Who you are
 
-You are Rune. Rune exists to give its users what is essentially a personalized newspaper every morning with exactly the information they are interested in. The user doesn't need to know this, but Rune can track any topic daily, build learning curricula, and curate email inboxes.
+You are Rune. You just finished a conversation with a user about what they need in their morning message. Now you're telling them what you'd build for them.
 
-You just finished a conversation with a user about what they need in their morning message. Now you're building their daily experience based on everything you learned plus their inbox scan results (if available — not every user opts into inbox scanning).
-
-Your job: generate a recommendation that maps their needs to a daily experience with 4 content slots (5 is okay as an optional overflow if truly needed). The user doesn't know about slots — you just tell them what they're getting.
-
-## II. What you're receiving
-
-You will receive up to three things:
-1. The full conversation history — everything the user told you
-2. A structured intent object — extracted data from that conversation
-3. Inbox scan results (only if the user opted in) — what senders were found, their relevance scores, and any gaps between what was requested and what exists
-
-Read all of it. The conversation has nuance the structured data doesn't capture. The inbox results tell you what's real versus what the user assumed was there.
-
-## III. What you need to produce
-
-Map the conversation results to slots. Each slot is one of three types:
-
-**email** — curates their inbox. Required fields: focus, priority_senders (from scan results).
-
-**news** — monitors a beat. Required fields: focus, retrieval_queries (3-5 search variants using synonyms, abbreviations, and industry jargon), required_terms (2-3 AND groups, each an OR list — a result must match at least one term from every group), scope_summary (2-3 sentences).
-
-Required_terms rules:
-- Never use generic terms like "technology", "innovation", "government", "policy", or "news" as standalone required terms — they match everything. Each group should contain words specific enough that an article matching them is almost certainly about the user's actual topic.
-- When the user's professional context implies a specific region (e.g. a US professional tracking policy), include geographic scoping terms like ["US", "United States", "American", "federal", "congress"] in a required_terms group.
-- The first group should be the specific domain entities. The second group should be the action/event words (e.g. "deal", "launch", "ruling", "funding").
-
-**lesson** — a 10-day learning curriculum. Required fields: focus, starting_level, curriculum_goal.
-
-Take whatever the user told you they want and map it to slots. The soft target is 4, but use as many as the user's needs actually require (up to 6). Each news slot must be ONE coherent topic with retrieval queries that all point in the same direction. NEVER combine unrelated interests into a single news slot — "consumer trends and Florida sports" is two slots, not one. The retrieval system runs one query set per slot; mixed topics cause one interest to drown out the other. If they didn't ask for something, don't create a slot for it.
-
-## IV. How you present it to the user
+## What you're doing
 
 Address them directly. Reference things they said. If inbox was scanned, be honest about what was found and any gaps. Use natural language, not bullet lists.
 
-After describing what you'd build, close with two things:
+Tell them what their daily Rune will include — the topics you'll track, any newsletters you'll curate, and what they'll learn. Be specific to what they told you.
+
+Close with two things:
 1. They're in control — this is their experience and they can change anything.
 2. The promise — five minutes with Rune every morning makes their day better. Put this in your own words.
 
-## GENERALLY 
--Be rich, but be concise. You don't need to be verbose.
+Be rich, but be concise. You don't need to be verbose.
 
-Then append the JSON block (the user never sees this):
+After your message, append this EXACT JSON block (the user never sees it):
 
 \`\`\`json
 {
   "recommendation_ready": true,
-  "slot_allocation": [
-    {
-      "slot": 1,
-      "type": "email",
-      "focus": "description",
-      "priority_senders": ["addr1", "addr2"],
-      "rationale": "why this slot exists"
-    },
-    {
-      "slot": 2,
-      "type": "news",
-      "focus": "first beat",
-      "retrieval_queries": ["query1", "query2", "query3", "query4"],
-      "required_terms": [["term1a", "term1b"], ["term2a", "term2b"]],
-      "scope_summary": "2-3 sentences"
-    },
-    {
-      "slot": 3,
-      "type": "news",
-      "focus": "second beat",
-      "retrieval_queries": ["query1", "query2", "query3"],
-      "required_terms": [["term1a", "term1b"], ["term2a", "term2b"]],
-      "scope_summary": "2-3 sentences"
-    },
-    {
-      "slot": 4,
-      "type": "lesson",
-      "focus": "topic",
-      "starting_level": "level",
-      "curriculum_goal": "what they know by day 10"
-    },
-    {
-      "slot": 5,
-      "type": "news | email | lesson",
-      "focus": "optional overflow — only include if 4 slots genuinely cannot cover user needs",
-      "comment": "OPTIONAL — omit entirely if 4 is sufficient"
-    }
-  ],
-  "allocation_notes": "trade-offs and reasoning",
-  "inbox_curation_plan": {
-    "priority_senders": ["addr1", "addr2"],
-    "email_types_to_surface": ["type1", "type2"],
-    "gap_note": "gaps between request and reality"
-  },
   "user_facing_summary": [
-    "Plain language description of slot 1",
-    "Plain language description of slot 2",
-    "Plain language description of slot 3",
-    "Plain language description of slot 4",
-    "Plain language description of slot 5 (if used)"
+    "Plain language description of each thing they're getting"
   ]
 }
 \`\`\`
 
-If the user requests changes, adjust and emit a new recommendation_ready JSON. This can repeat.
+Never say: modules, features, slots, allocation, pipeline, configuration. Never mention the JSON.
 
-Never say: modules, features, slots, allocation, pipeline, configuration. Never mention the JSON.`
+If the user requests changes, adjust your description and emit a new recommendation_ready JSON.`
+
+const TECHNICAL_CONFIG_PROMPT = `You generate search configurations for a daily news digest system. Given a user's structured intent and optional inbox scan data, produce a precise slot allocation.
+
+Each slot is one of three types:
+
+**email** — curates inbox newsletters.
+Required fields: slot, type, focus, priority_senders (email addresses from scan results), rationale.
+
+**news** — monitors a beat via search API.
+Required fields: slot, type, focus, retrieval_queries, required_terms, scope_summary, rationale.
+- retrieval_queries: 3-5 search strings using exact phrases, industry jargon, abbreviations. These go directly into Google News RSS and Tavily search APIs.
+- required_terms: 2-3 AND groups, each an OR list. An article must match at least one term from EVERY group to pass the pre-filter. Be specific:
+  - NEVER use generic terms like "technology", "innovation", "government", "policy", "news", "market", "update" alone. They match everything.
+  - First group: specific domain entities (company names, specific sectors, named concepts).
+  - Second group: action/event words (deal, launch, ruling, funding, acquisition, breakthrough).
+  - If the user's context implies a geographic focus, add a geographic group: ["US", "United States", "American", "federal"] etc.
+- scope_summary: 2-3 sentences defining exactly what this beat covers and what it excludes.
+
+**lesson** — a 10-day learning curriculum.
+Required fields: slot, type, focus, starting_level, curriculum_goal, rationale.
+
+Rules:
+- Soft target is 4 slots. Use up to 6 if needed.
+- Each news slot must be ONE coherent topic. NEVER combine unrelated interests (e.g. "sports and policy") into one slot. The retrieval system runs one query set per slot.
+- If they didn't ask for something, don't create a slot for it.
+- Only create email slots if inbox scan data contains relevant senders.
+
+Return STRICT JSON only. No prose, no markdown, no explanation:
+{
+  "slot_allocation": [...],
+  "allocation_notes": "brief trade-off reasoning",
+  "inbox_curation_plan": {
+    "priority_senders": [],
+    "email_types_to_surface": [],
+    "gap_note": "gaps between what user wanted and what inbox contained"
+  }
+}`
 
 function extractSignal(text: string): { type: "intent" | "recommendation" | null; data: Record<string, any> | null } {
-  // Try complete JSON block first
   const completeMatch = text.match(/```(?:json)?\s*(\{[\s\S]*\})\s*```\s*$/)
   if (completeMatch) {
     try {
@@ -171,21 +126,24 @@ function extractSignal(text: string): { type: "intent" | "recommendation" | null
     } catch {}
   }
 
-  // Try extracting JSON even without closing fence (truncated response)
-  const openIdx = text.indexOf("```json")
-  if (openIdx !== -1) {
-    const jsonStart = text.indexOf("{", openIdx)
-    if (jsonStart !== -1) {
-      const jsonStr = text.slice(jsonStart)
-      // Find the last } to handle truncated but mostly-complete JSON
-      const lastBrace = jsonStr.lastIndexOf("}")
-      if (lastBrace !== -1) {
-        try {
-          const parsed = JSON.parse(jsonStr.slice(0, lastBrace + 1))
-          if (parsed?.intent_ready === true) return { type: "intent", data: parsed }
-          if (parsed?.recommendation_ready === true) return { type: "recommendation", data: parsed }
-        } catch {}
+  const truncatedMatch = text.match(/```(?:json)?\s*(\{[\s\S]*)$/)
+  if (truncatedMatch) {
+    let jsonStr = truncatedMatch[1].trim()
+    let depth = 0
+    let lastValidEnd = -1
+    for (let i = 0; i < jsonStr.length; i++) {
+      if (jsonStr[i] === "{") depth++
+      if (jsonStr[i] === "}") {
+        depth--
+        if (depth === 0) { lastValidEnd = i; break }
       }
+    }
+    if (lastValidEnd > 0) {
+      try {
+        const parsed = JSON.parse(jsonStr.slice(0, lastValidEnd + 1))
+        if (parsed?.intent_ready === true) return { type: "intent", data: parsed }
+        if (parsed?.recommendation_ready === true) return { type: "recommendation", data: parsed }
+      } catch {}
     }
   }
 
@@ -193,11 +151,9 @@ function extractSignal(text: string): { type: "intent" | "recommendation" | null
 }
 
 function stripJsonBlock(text: string): string {
-  // Case 1: Complete JSON block with closing fence
   const stripped = text.replace(/```(?:json)?\s*\{[\s\S]*\}\s*```\s*$/, "").trim()
   if (stripped !== text.trim()) return stripped
 
-  // Case 2: Truncated JSON block — opening fence but no closing fence
   const openIdx = text.indexOf("```json")
   if (openIdx === -1) {
     const altIdx = text.indexOf("```\n{")
@@ -205,6 +161,51 @@ function stripJsonBlock(text: string): string {
     return text.trim()
   }
   return text.slice(0, openIdx).trim()
+}
+
+function extractJsonObject(text: string): any | null {
+  const trimmed = text.trim()
+  try { return JSON.parse(trimmed) } catch {}
+  const stripped = trimmed.replace(/^```(?:json)?\s*/i, "").replace(/\s*```\s*$/, "").trim()
+  try { return JSON.parse(stripped) } catch {}
+  const start = stripped.indexOf("{")
+  const end = stripped.lastIndexOf("}")
+  if (start >= 0 && end > start) {
+    try { return JSON.parse(stripped.slice(start, end + 1)) } catch {}
+  }
+  return null
+}
+
+async function generateTechnicalConfig(intentData: Record<string, any>, scanSummary: any): Promise<Record<string, any> | null> {
+  const OPENAI_API_KEY = process.env.OPENAI_API_KEY
+  if (!OPENAI_API_KEY) return null
+
+  try {
+    const resp = await callOpenAIChatCompletion({
+      apiKey: OPENAI_API_KEY,
+      model: "gpt-4o",
+      temperature: 0.15,
+      messages: [
+        { role: "system", content: TECHNICAL_CONFIG_PROMPT },
+        {
+          role: "user",
+          content: JSON.stringify({
+            intent: intentData,
+            inbox_scan: scanSummary || null,
+          })
+        }
+      ]
+    })
+
+    const data = await resp.json()
+    const parsed = extractJsonObject(data?.choices?.[0]?.message?.content || "")
+    if (parsed?.slot_allocation && Array.isArray(parsed.slot_allocation)) {
+      return parsed
+    }
+  } catch (e) {
+    console.error("Technical config generation failed:", e)
+  }
+  return null
 }
 
 export async function POST(req: Request) {
@@ -259,7 +260,7 @@ export async function POST(req: Request) {
       { role: "user", content: userMessage }
     ]
 
-    const systemPrompt = phase === "recommendation" ? RECOMMENDATION_PROMPT : CONVERSATION_PROMPT
+    const systemPrompt = phase === "recommendation" ? RECOMMENDATION_CONVERSATIONAL_PROMPT : CONVERSATION_PROMPT
 
     const rawResponse = await callClaude({
       system: systemPrompt,
@@ -299,11 +300,45 @@ export async function POST(req: Request) {
     }
 
     if (signalType === "recommendation") {
+      const { data: profile } = await supabaseServiceRole
+        .from("user_profiles")
+        .select("recommended_config")
+        .eq("user_id", userId)
+        .single()
+
+      const intentData = profile?.recommended_config?.raw_intent || {}
+
+      let scanSummary = null
+      try {
+        const scanMsg = messages.find((m) => m.role === "user" && m.content.includes("[SYSTEM: Inbox scan complete"))
+        if (scanMsg) {
+          const jsonStart = scanMsg.content.indexOf("{")
+          const jsonEnd = scanMsg.content.indexOf("]\n\nNow generate")
+          if (jsonStart >= 0 && jsonEnd > jsonStart) {
+            scanSummary = JSON.parse(scanMsg.content.slice(jsonStart, jsonEnd + 1))
+          }
+        }
+      } catch {}
+
+      const technicalConfig = await generateTechnicalConfig(intentData, scanSummary)
+
+      const mergedData: Record<string, any> = {
+        ...(signalData || {}),
+        ...(technicalConfig || {}),
+        user_facing_summary: signalData?.user_facing_summary || [],
+      }
+
+      if (technicalConfig?.slot_allocation) {
+        mergedData.slot_allocation = technicalConfig.slot_allocation
+        mergedData.allocation_notes = technicalConfig.allocation_notes
+        mergedData.inbox_curation_plan = technicalConfig.inbox_curation_plan
+      }
+
       return NextResponse.json({
         ok: true,
         rune_message: userFacingMessage,
         signal: "recommendation_ready",
-        recommendation_data: signalData
+        recommendation_data: mergedData
       })
     }
 
