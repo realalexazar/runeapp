@@ -1348,9 +1348,11 @@ export async function generateDailyNewsTopics(input: {
         const retrieval = await fetchNewsArticlesForTier(topic, tier)
         const unseenArticles = retrieval.articles.filter((article) => !recentlyUsedUrls.has(article.link))
         const substantiveArticles = unseenArticles.filter(isSubstantiveArticle)
+        const preFilteredArticles = substantiveArticles.filter((article) => passesTopicPreFilter(article, topic))
+        const articlesToProcess = preFilteredArticles.length >= 3 ? preFilteredArticles : substantiveArticles
 
-        const alreadyHydrated = substantiveArticles.filter((article) => hasUsableContentPreview(article))
-        const needsHydration = substantiveArticles.filter((article) => !hasUsableContentPreview(article))
+        const alreadyHydrated = articlesToProcess.filter((article) => hasUsableContentPreview(article))
+        const needsHydration = articlesToProcess.filter((article) => !hasUsableContentPreview(article))
         const freshlyHydrated = await Promise.all(
           needsHydration.slice(0, 8).map((article) => hydrateArticlePreview(article))
         )
@@ -1365,14 +1367,14 @@ export async function generateDailyNewsTopics(input: {
           raw_count: retrieval.articles.length,
           unseen_count: unseenArticles.length,
           substantive_count: substantiveArticles.length,
-          prefiltered_count: substantiveArticles.length,
+          prefiltered_count: preFilteredArticles.length,
           hydrated_count: alreadyHydrated.length + freshlyHydrated.length,
           hydration_passed_count: allArticles.length,
           relevant_count: allArticles.length,
           selected: allArticles.length > 0
         }
         retrievalFunnel.push(funnelEntry)
-        console.log(`[news-retrieval] topic="${topic.topic_text}" tier=${tier.key}: ${funnelEntry.raw_count} raw → ${funnelEntry.substantive_count} substantive → ${allArticles.length} candidates`)
+        console.log(`[news-retrieval] topic="${topic.topic_text}" tier=${tier.key}: ${funnelEntry.raw_count} raw → ${funnelEntry.prefiltered_count} prefiltered (${preFilteredArticles.length >= 3 ? "used" : "bypassed"}) → ${allArticles.length} candidates`)
 
         if (allArticles.length > 0) {
           selectedTier = tier
