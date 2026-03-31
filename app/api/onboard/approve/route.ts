@@ -3,6 +3,16 @@ import { getSupabaseServerClient } from "@/lib/supabase/server"
 import { supabaseServiceRole } from "@/lib/supabase/service"
 import { generateCurriculumPlan } from "@/lib/onboard/generate-curriculum"
 
+const ALLOWED_LEVELS = ["beginner", "intermediate", "advanced"] as const
+
+function normalizeStartingLevel(raw: string): string {
+  const lower = raw.toLowerCase()
+  if (ALLOWED_LEVELS.includes(lower as any)) return lower
+  if (lower.includes("expert") || lower.includes("advanced") || lower.includes("senior")) return "advanced"
+  if (lower.includes("intermediate") || lower.includes("familiar") || lower.includes("some")) return "intermediate"
+  return "beginner"
+}
+
 export async function POST(req: Request) {
   const supabase = await getSupabaseServerClient()
   const { data: { user }, error: userError } = await supabase.auth.getUser()
@@ -116,12 +126,13 @@ export async function POST(req: Request) {
         .eq("active", true)
 
       for (const slot of lessonSlots) {
-        const startingLevel = slot.starting_level || "beginner"
+        const rawLevel = slot.starting_level || "beginner"
+        const normalizedLevel = normalizeStartingLevel(rawLevel)
         const curriculumGoal = slot.curriculum_goal || null
 
         const curriculumPlan = await generateCurriculumPlan({
           topic: slot.focus,
-          startingLevel,
+          startingLevel: rawLevel,
           curriculumGoal,
           scopeSummary: slot.scope_summary || null,
         })
@@ -133,11 +144,11 @@ export async function POST(req: Request) {
             topic_text: slot.focus,
             topic_raw_text: slot.focus,
             curriculum_goal: curriculumGoal,
-            starting_level: startingLevel,
+            starting_level: normalizedLevel,
             topic_mapping_json: {
               normalized_topic: slot.focus,
               scope_summary: curriculumGoal || slot.focus,
-              starting_level: startingLevel,
+              starting_level: rawLevel,
               curriculum_plan: curriculumPlan,
               lesson_state: {
                 status: "active",
