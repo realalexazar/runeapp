@@ -77,6 +77,11 @@ Map the conversation results to slots. Each slot is one of three types:
 
 **news** — monitors a beat. Required fields: focus, retrieval_queries (3-5 search variants using synonyms, abbreviations, and industry jargon), required_terms (2-3 AND groups, each an OR list — a result must match at least one term from every group), scope_summary (2-3 sentences).
 
+Required_terms rules:
+- Never use generic terms like "technology", "innovation", "government", "policy", or "news" as standalone required terms — they match everything. Each group should contain words specific enough that an article matching them is almost certainly about the user's actual topic.
+- When the user's professional context implies a specific region (e.g. a US professional tracking policy), include geographic scoping terms like ["US", "United States", "American", "federal", "congress"] in a required_terms group.
+- The first group should be the specific domain entities. The second group should be the action/event words (e.g. "deal", "launch", "ruling", "funding").
+
 **lesson** — a 10-day learning curriculum. Required fields: focus, starting_level, curriculum_goal.
 
 Take whatever the user told you they want and map it to slots. The soft target is 4, but use as many as the user's needs actually require (up to 6). Each news slot must be ONE coherent topic with retrieval queries that all point in the same direction. NEVER combine unrelated interests into a single news slot — "consumer trends and Florida sports" is two slots, not one. The retrieval system runs one query set per slot; mixed topics cause one interest to drown out the other. If they didn't ask for something, don't create a slot for it.

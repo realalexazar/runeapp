@@ -132,11 +132,26 @@ export async function buildUnifiedDigest(input: {
   const newsItems = ((newsRows || []) as GeneratedModuleRow[]).map((row) => ({
     title: row.title,
     content: row.metadata?.empty_state
-      ? `No notable developments today.`
+      ? `No notable developments on ${row.metadata?.topic_text || row.title} today.`
       : row.content,
     references: Array.isArray(row.metadata?.references) ? row.metadata!.references : [],
     empty: !!row.metadata?.empty_state
   }))
+
+  const emptyTopics = newsItems.filter((item) => item.empty)
+  const activeTopics = newsItems.filter((item) => !item.empty)
+
+  if (emptyTopics.length >= 2) {
+    const collapsedTitle = emptyTopics.map((t) => t.title).join(" and ")
+    const collapsedItem = {
+      title: collapsedTitle,
+      content: `Quiet day on ${collapsedTitle}.`,
+      references: [] as any[],
+      empty: true,
+    }
+    newsItems.length = 0
+    newsItems.push(...activeTopics, collapsedItem)
+  }
 
   if (newsItems.length > 0) {
     sections.push({
