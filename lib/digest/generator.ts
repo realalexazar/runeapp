@@ -263,6 +263,26 @@ async function fetchTavilyNews(input: {
   return allArticles
 }
 
+const TIER1_SOURCES = new Set([
+  "reuters.com", "bloomberg.com", "wsj.com", "ft.com", "cnbc.com",
+  "nytimes.com", "washingtonpost.com", "techcrunch.com", "theverge.com",
+  "arstechnica.com", "apnews.com", "bbc.com", "bbc.co.uk", "npr.org",
+  "aljazeera.com", "economist.com",
+])
+
+const TIER2_SOURCES = new Set([
+  "businessinsider.com", "forbes.com", "fortune.com", "marketwatch.com",
+  "barrons.com", "axios.com", "politico.com", "thehill.com", "wired.com",
+  "seekingalpha.com", "morningstar.com", "investopedia.com", "yahoo.com",
+])
+
+function getSourceTier(hostname: string): "tier1" | "tier2" | "tier3" {
+  const clean = hostname.replace(/^www\./, "").toLowerCase()
+  if (TIER1_SOURCES.has(clean)) return "tier1"
+  if (TIER2_SOURCES.has(clean)) return "tier2"
+  return "tier3"
+}
+
 function isSubstantiveArticle(article: NewsArticle) {
   const combined = `${article.title} ${article.description}`.trim()
   if (!article.title || article.title.length < 18) return false
@@ -886,6 +906,7 @@ Return STRICT JSON:
 }
 
 Filtering rules:
+- Each candidate has a source_tier (tier1 = major outlets like Reuters/WSJ/Bloomberg, tier2 = established business press, tier3 = other). When multiple articles cover the same story, prefer higher-tier sources.
 - A candidate is relevant ONLY if a person tracking the exact topic "${input.topic.topic_text}" would consider it a meaningful update.
 - Tangential, adjacent, or loosely-related candidates are NOT relevant. Reject them.
 - If zero candidates are relevant, set relevant_indexes to [] and content to "No notable developments today."
@@ -915,6 +936,7 @@ Synthesis rules:
             index,
             title: article.title,
             source: article.source,
+            source_tier: getSourceTier(article.source || ""),
             pubDate: article.pubDate,
             url: article.resolvedUrl || article.link,
             description: article.description,
@@ -1003,25 +1025,15 @@ async function fetchNewsArticlesForTier(topic: NewsTopicRecord, tier: NewsFreshn
   const queries = buildNewsSearchQueries(topic)
   const days = tierKeyToDays(tier.key)
 
-  const [googleArticles, tavilyArticles] = await Promise.all([
-    fetchGoogleNewsForTier(queries, tier),
-    fetchTavilyNews({ queries, days, maxResults: 10 })
-  ])
+  const tavilyArticles = await fetchTavilyNews({ queries, days, maxResults: 10 })
+  const deduped = deduplicateArticlesCrossProvider(tavilyArticles)
 
-  const combined = [...tavilyArticles, ...googleArticles]
-  const deduped = deduplicateArticlesCrossProvider(combined)
-
-  const sourceBreakdown = {
-    tavily: tavilyArticles.length,
-    google: googleArticles.length,
-    after_dedup: deduped.length
-  }
-  console.log(`[news-retrieval] tier=${tier.key} sources: tavily=${sourceBreakdown.tavily} google=${sourceBreakdown.google} deduped=${sourceBreakdown.after_dedup}`)
+  console.log(`[news-retrieval] tier=${tier.key} sources: tavily=${tavilyArticles.length} deduped=${deduped.length}`)
 
   return {
     query: queries.join(" | "),
     articles: deduped.slice(0, 16),
-    sourceBreakdown
+    sourceBreakdown: { tavily: tavilyArticles.length, after_dedup: deduped.length }
   }
 }
 

@@ -88,7 +88,7 @@ Required fields: slot, type, focus, priority_senders (email addresses from scan 
 
 **news** — monitors a beat via search API.
 Required fields: slot, type, focus, retrieval_queries, required_terms, scope_summary, rationale.
-- retrieval_queries: 3-5 search strings using exact phrases, industry jargon, abbreviations. These go directly into Google News RSS and Tavily search APIs.
+- retrieval_queries: 3-5 search strings using exact phrases, industry jargon, abbreviations. These go directly into the Tavily search API. Each query must approach the topic from a genuinely different angle. If query 1 is "commercial real estate deals", query 2 should NOT be "CRE transactions" (same search, different words). Query 2 should be "CMBS delinquency rates" or "commercial property foreclosure filings" — a different facet of the same beat.
 - required_terms: 2-3 AND groups, each an OR list. An article must match at least one term from EVERY group to pass the pre-filter. Be specific:
   - NEVER use generic terms like "technology", "innovation", "government", "policy", "news", "market", "update" alone. They match everything.
   - First group: specific domain entities (company names, specific sectors, named concepts).
