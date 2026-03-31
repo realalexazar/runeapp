@@ -513,7 +513,7 @@ Keep reasons short.`
 
   const resp = await callOpenAIChatCompletion({
     apiKey: OPENAI_API_KEY,
-    model: "gpt-4o-mini",
+    model: "gpt-4o",
     temperature: 0.1,
     messages: [
       { role: "system", content: prompt },
@@ -714,7 +714,7 @@ Tone:
 
   const resp = await callOpenAIChatCompletion({
     apiKey: OPENAI_API_KEY,
-    model: "gpt-4o-mini",
+    model: "gpt-4o",
     temperature: 0.4,
     messages: [
       { role: "system", content: prompt },
@@ -793,7 +793,7 @@ Requirements:
 
   const resp = await callOpenAIChatCompletion({
     apiKey: OPENAI_API_KEY,
-    model: "gpt-4o-mini",
+    model: "gpt-4o",
     temperature: 0.3,
     messages: [
       { role: "system", content: prompt },
