@@ -843,6 +843,111 @@ Requirements:
   }
 }
 
+async function unifiedFilterAndSynthesize(input: {
+  topic: NewsTopicRecord
+  searchInstruction: string
+  candidates: NewsArticle[]
+  framingLabel: string
+  tierKey: NewsFreshnessTier["key"]
+  professionalContext?: string | null
+}) {
+  if (!OPENAI_API_KEY) {
+    return {
+      title: input.topic.topic_text,
+      content: `${input.framingLabel}: ${input.candidates.slice(0, 3).map((a) => `${a.title} (${a.source || "Source"})`).join("; ")}`,
+      references: input.candidates.slice(0, 3).map((a) => ({ title: a.title, url: a.link, source: a.source || "Source" })),
+      whyThisMatters: null,
+      articlesUsed: Math.min(3, input.candidates.length),
+    }
+  }
+
+  const contextClause = input.professionalContext
+    ? `The user's professional context: "${input.professionalContext}". Use this to judge geographic and domain relevance.`
+    : ""
+
+  const prompt = `You are Rune's intelligence analyst. You receive raw candidate articles from a news retrieval system and a user's topic.
+
+Your job is TWO things in ONE pass:
+1. FILTER: Decide which candidates are genuinely relevant to the user's exact topic. Most candidates will be noise — reject them. A keyword overlap is NOT enough. Only keep articles that someone tracking this specific topic would want to read.
+2. SYNTHESIZE: From the relevant articles, write a concise intelligence brief.
+
+${contextClause}
+
+Return STRICT JSON:
+{
+  "relevant_indexes": [0, 2, 5],
+  "title": "string",
+  "content": "string",
+  "references": [
+    { "title": "string", "url": "string", "source": "string" }
+  ],
+  "why_this_matters": "string | null",
+  "articles_used": 3
+}
+
+Filtering rules:
+- A candidate is relevant ONLY if a person tracking the exact topic "${input.topic.topic_text}" would consider it a meaningful update.
+- Tangential, adjacent, or loosely-related candidates are NOT relevant. Reject them.
+- If zero candidates are relevant, set relevant_indexes to [] and content to "No notable developments today."
+
+Synthesis rules:
+- Be specific: name the companies, the numbers, the actual developments.
+- If relevant articles cover different subtopics, present each as a separate brief item. Do not force unrelated stories into one narrative.
+- If only 1 article is relevant: two sentences max. Present it directly, don't pad.
+- If 2 articles: 2-3 sentences max.
+- Only include "why_this_matters" if it adds genuinely new insight. If it would restate the brief, set to null.
+- References must point to the articles you actually used.`
+
+  const resp = await callOpenAIChatCompletion({
+    apiKey: OPENAI_API_KEY,
+    model: "gpt-4o",
+    temperature: 0.25,
+    messages: [
+      { role: "system", content: prompt },
+      {
+        role: "user",
+        content: JSON.stringify({
+          topic: input.topic.topic_text,
+          search_instruction: input.searchInstruction,
+          freshness_tier: input.tierKey,
+          framing_label: input.framingLabel,
+          candidates: input.candidates.map((article, index) => ({
+            index,
+            title: article.title,
+            source: article.source,
+            pubDate: article.pubDate,
+            url: article.resolvedUrl || article.link,
+            description: article.description,
+            content_preview: article.contentPreview || null,
+          }))
+        })
+      }
+    ]
+  })
+
+  const data = await resp.json()
+  const raw = data?.choices?.[0]?.message?.content || ""
+  const parsed = extractJsonObject(raw)
+
+  if (!parsed || (!parsed.content && (!parsed.relevant_indexes || parsed.relevant_indexes.length === 0))) {
+    return {
+      title: input.topic.topic_text,
+      content: `No notable developments on ${input.topic.topic_text} today.`,
+      references: [],
+      whyThisMatters: null,
+      articlesUsed: 0,
+    }
+  }
+
+  return {
+    title: String(parsed.title || input.topic.topic_text),
+    content: String(parsed.content || `No notable developments on ${input.topic.topic_text} today.`),
+    references: Array.isArray(parsed.references) ? parsed.references : [],
+    whyThisMatters: parsed.why_this_matters ? String(parsed.why_this_matters) : null,
+    articlesUsed: Number(parsed.articles_used || parsed.relevant_indexes?.length || 0),
+  }
+}
+
 async function fetchNewsArticles(topic: NewsTopicRecord) {
   const baseQuery = buildNewsSearchBase(topic)
   const timeframeOperator = timeframeToGoogleNewsOperator(topic.timeframe)
@@ -1236,58 +1341,43 @@ export async function generateDailyNewsTopics(input: {
 
       let selectedTier: NewsFreshnessTier | null = null
       let selectedQuery = ""
-      let selectedArticles: NewsArticle[] = []
-      let selectedEvaluations: NewsRelevanceEvaluation[] = []
+      let allCandidates: NewsArticle[] = []
       const retrievalFunnel: RetrievalFunnelLog[] = []
 
       for (const tier of NEWS_FRESHNESS_TIERS) {
         const retrieval = await fetchNewsArticlesForTier(topic, tier)
         const unseenArticles = retrieval.articles.filter((article) => !recentlyUsedUrls.has(article.link))
         const substantiveArticles = unseenArticles.filter(isSubstantiveArticle)
-        let preFilteredArticles = substantiveArticles.filter((article) => passesTopicPreFilter(article, topic))
-        if (preFilteredArticles.length < 3 && substantiveArticles.length > preFilteredArticles.length) {
-          preFilteredArticles = substantiveArticles.slice(0, 12)
-        }
-        const alreadyHydrated = preFilteredArticles.filter((article) => hasUsableContentPreview(article))
-        const needsHydration = preFilteredArticles.filter((article) => !hasUsableContentPreview(article))
+
+        const alreadyHydrated = substantiveArticles.filter((article) => hasUsableContentPreview(article))
+        const needsHydration = substantiveArticles.filter((article) => !hasUsableContentPreview(article))
         const freshlyHydrated = await Promise.all(
-          needsHydration.slice(0, 6).map((article) => hydrateArticlePreview(article))
+          needsHydration.slice(0, 8).map((article) => hydrateArticlePreview(article))
         )
-        const freshlyHydrationPassed = freshlyHydrated.filter(hasUsableContentPreview)
-        const hydrationPassedArticles = [...alreadyHydrated, ...freshlyHydrationPassed]
-        const hydrationFailedButDescriptive = freshlyHydrated
-          .filter((a) => !hasUsableContentPreview(a))
-          .filter((a) => `${a.title} ${a.description}`.trim().length >= 80)
-        const articlesForRelevance = [...hydrationPassedArticles, ...hydrationFailedButDescriptive]
-        const relevance = await filterRelevantNewsArticles({
-          topic,
-          searchInstruction,
-          articles: articlesForRelevance,
-          professionalContext,
-        })
-        const relevantArticles = relevance.relevantArticles
-        const minArticlesForTier = tier.key === "24h" ? 1 : 2
-        const hasEnoughSignal = relevantArticles.length >= minArticlesForTier
+        const allArticles = [
+          ...alreadyHydrated,
+          ...freshlyHydrated.filter(hasUsableContentPreview),
+          ...freshlyHydrated.filter((a) => !hasUsableContentPreview(a)).filter((a) => `${a.title} ${a.description}`.trim().length >= 80),
+        ]
 
         const funnelEntry: RetrievalFunnelLog = {
           tier: tier.key,
           raw_count: retrieval.articles.length,
           unseen_count: unseenArticles.length,
           substantive_count: substantiveArticles.length,
-          prefiltered_count: preFilteredArticles.length,
+          prefiltered_count: substantiveArticles.length,
           hydrated_count: alreadyHydrated.length + freshlyHydrated.length,
-          hydration_passed_count: hydrationPassedArticles.length,
-          relevant_count: relevantArticles.length,
-          selected: hasEnoughSignal
+          hydration_passed_count: allArticles.length,
+          relevant_count: allArticles.length,
+          selected: allArticles.length > 0
         }
         retrievalFunnel.push(funnelEntry)
-        console.log(`[news-retrieval] topic="${topic.topic_text}" tier=${tier.key}: ${funnelEntry.raw_count} raw → ${funnelEntry.prefiltered_count} prefiltered → ${funnelEntry.hydration_passed_count} hydrated → ${funnelEntry.relevant_count} relevant → ${hasEnoughSignal ? "SELECTED" : "SKIP"}`)
+        console.log(`[news-retrieval] topic="${topic.topic_text}" tier=${tier.key}: ${funnelEntry.raw_count} raw → ${funnelEntry.substantive_count} substantive → ${allArticles.length} candidates`)
 
-        if (hasEnoughSignal) {
+        if (allArticles.length > 0) {
           selectedTier = tier
           selectedQuery = retrieval.query
-          selectedArticles = relevantArticles
-          selectedEvaluations = relevance.evaluations
+          allCandidates = allArticles
           break
         }
       }
@@ -1305,13 +1395,14 @@ export async function generateDailyNewsTopics(input: {
         retrieval_funnel: retrievalFunnel
       }
 
-      if (selectedTier && selectedArticles.length > 0) {
-        const brief = await synthesizeNewsBrief({
+      if (selectedTier && allCandidates.length > 0) {
+        const brief = await unifiedFilterAndSynthesize({
           topic,
           searchInstruction,
-          articles: selectedArticles,
+          candidates: allCandidates.slice(0, 15),
           framingLabel: selectedTier.framingLabel,
-          tierKey: selectedTier.key
+          tierKey: selectedTier.key,
+          professionalContext,
         })
         title = brief.title
         const framedContent = selectedTier.key === "24h"
@@ -1327,12 +1418,11 @@ export async function generateDailyNewsTopics(input: {
             ...ref,
             url: String(ref?.url || "")
           })),
-          article_count: selectedArticles.length,
-          relevance_evaluations: selectedEvaluations,
+          article_count: brief.articlesUsed,
           freshness_tier: selectedTier.key,
           framing_label: selectedTier.framingLabel,
           empty_state: false,
-          retrieval_links: selectedArticles.map((article) => article.resolvedUrl || article.link),
+          retrieval_links: allCandidates.slice(0, 15).map((article) => article.resolvedUrl || article.link),
           retrieval_funnel: retrievalFunnel
         }
       }
