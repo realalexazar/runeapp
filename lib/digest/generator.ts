@@ -246,7 +246,7 @@ async function fetchTavilyNews(input: {
           description: snippet.slice(0, 500),
           source: String(new URL(result.url || "https://unknown").hostname).replace(/^www\./, ""),
           resolvedUrl: String(result.url || "").trim(),
-          contentPreview: bestContent.slice(0, 4000) || null
+          contentPreview: bestContent.slice(0, 8000) || null
         }
       }).filter((article: NewsArticle) => article.title && article.link)
     })
@@ -312,8 +312,7 @@ function passesTopicPreFilter(article: NewsArticle, topic: NewsTopicRecord): boo
 
   const haystack = `${article.title} ${article.description}`.toLowerCase()
   const matchedGroups = requiredGroups.filter((group) => group.some((term) => haystack.includes(term)))
-  const minGroupsRequired = Math.min(2, requiredGroups.length)
-  return matchedGroups.length >= minGroupsRequired
+  return matchedGroups.length >= requiredGroups.length
 }
 
 function uniqueStrings(values: Array<string | null | undefined>) {
@@ -415,6 +414,11 @@ function extractArticlePreview(html: string, url: string): string | null {
 
 async function hydrateArticlePreview(article: NewsArticle): Promise<NewsArticle> {
   const source = article.source || new URL(article.link || "https://unknown").hostname
+
+  if (article.link.includes("news.google.com/rss/articles")) {
+    return { ...article, contentPreview: null }
+  }
+
   try {
     const resp = await fetchWithTimeout(article.link, {
       headers: {
@@ -482,10 +486,15 @@ async function filterRelevantNewsArticles(input: {
   topic: NewsTopicRecord
   searchInstruction: string
   articles: NewsArticle[]
+  professionalContext?: string | null
 }) {
   if (!OPENAI_API_KEY) {
     return fallbackRelevantNewsArticles(input)
   }
+
+  const contextClause = input.professionalContext
+    ? `\n- Consider the user's professional context when evaluating relevance: "${input.professionalContext}". An article about foreign policy in another country is not relevant to a US-focused professional unless it directly impacts their domain.`
+    : ""
 
   const prompt = `You are Rune's news relevance filter.
 Your job is to decide whether each candidate source is substantively about the user's exact topic.
@@ -493,7 +502,7 @@ Your job is to decide whether each candidate source is substantively about the u
 Core rule:
 - A source is relevant only if a person tracking the exact topic would consider it a meaningful update on that topic.
 - Sharing one keyword is not enough.
-- Tangential, adjacent, or loosely related sources are NOT relevant.
+- Tangential, adjacent, or loosely related sources are NOT relevant.${contextClause}
 - When in doubt, reject.
 
 Return STRICT JSON:
@@ -787,10 +796,10 @@ Return STRICT JSON:
 
 Requirements:
 - Be specific: name the companies, the numbers, the actual news. No vague summaries.
-- Synthesize the important developments, do not list headlines.
+- If the retrieved articles cover different subtopics, present each as a separate brief item — do not force them into one unified narrative. A brief with three distinct items is better than one paragraph pretending three unrelated stories are connected.
+- ${articleCount === 1 ? "You have ONE source. Do not synthesize. Present it directly: 'One notable development: [specific thing]. [Source].' Two sentences max." : articleCount <= 2 ? "You have very few sources. Write 2-3 sentences max. Be short and honest. Do NOT pad thin material." : "Keep content concise and digestible."}
 - Respect the freshness framing. If the window is broader than today, write it as a concise status update over that period.
-- ${articleCount <= 2 ? "You have very few sources. Write 2-3 sentences max. Be short and honest about what happened. Do NOT pad thin material." : "Keep content to one digestible paragraph."}
-- Only include "why_this_matters" if it adds genuinely new insight. If it would just restate the brief, set it to null.
+- Only include "why_this_matters" if it adds genuinely new insight beyond what the brief already says. If it would just restate or rephrase the content, set it to null.
 - Use only the provided retrieved items.
 - References must point to the most relevant items.`
 
@@ -1182,6 +1191,13 @@ export async function generateDailyNewsTopics(input: {
     const topics = await getActiveNewsTopicRecords(input.userId)
     const outputs: GeneratedModuleItem[] = []
 
+    const { data: profile } = await supabaseServiceRole
+      .from("user_profiles")
+      .select("professional_context")
+      .eq("user_id", input.userId)
+      .maybeSingle()
+    const professionalContext = profile?.professional_context || null
+
     for (const topic of topics) {
       const existing = await getGeneratedItemForDate({
         userId: input.userId,
@@ -1243,7 +1259,8 @@ export async function generateDailyNewsTopics(input: {
         const relevance = await filterRelevantNewsArticles({
           topic,
           searchInstruction,
-          articles: articlesForRelevance
+          articles: articlesForRelevance,
+          professionalContext,
         })
         const relevantArticles = relevance.relevantArticles
         const minArticlesForTier = tier.key === "24h" ? 1 : 2
