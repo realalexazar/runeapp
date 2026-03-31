@@ -900,7 +900,7 @@ async function fetchNewsArticlesForTier(topic: NewsTopicRecord, tier: NewsFreshn
 
   const [googleArticles, tavilyArticles] = await Promise.all([
     fetchGoogleNewsForTier(queries, tier),
-    fetchTavilyNews({ queries, days, maxResults: 5 })
+    fetchTavilyNews({ queries, days, maxResults: 10 })
   ])
 
   const combined = [...tavilyArticles, ...googleArticles]
@@ -1244,7 +1244,10 @@ export async function generateDailyNewsTopics(input: {
         const retrieval = await fetchNewsArticlesForTier(topic, tier)
         const unseenArticles = retrieval.articles.filter((article) => !recentlyUsedUrls.has(article.link))
         const substantiveArticles = unseenArticles.filter(isSubstantiveArticle)
-        const preFilteredArticles = substantiveArticles.filter((article) => passesTopicPreFilter(article, topic))
+        let preFilteredArticles = substantiveArticles.filter((article) => passesTopicPreFilter(article, topic))
+        if (preFilteredArticles.length < 3 && substantiveArticles.length > preFilteredArticles.length) {
+          preFilteredArticles = substantiveArticles.slice(0, 12)
+        }
         const alreadyHydrated = preFilteredArticles.filter((article) => hasUsableContentPreview(article))
         const needsHydration = preFilteredArticles.filter((article) => !hasUsableContentPreview(article))
         const freshlyHydrated = await Promise.all(
