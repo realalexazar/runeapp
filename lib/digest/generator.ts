@@ -1025,15 +1025,20 @@ async function fetchNewsArticlesForTier(topic: NewsTopicRecord, tier: NewsFreshn
   const queries = buildNewsSearchQueries(topic)
   const days = tierKeyToDays(tier.key)
 
-  const tavilyArticles = await fetchTavilyNews({ queries, days, maxResults: 10 })
-  const deduped = deduplicateArticlesCrossProvider(tavilyArticles)
+  const [tavilyArticles, googleArticles] = await Promise.all([
+    fetchTavilyNews({ queries, days, maxResults: 10 }),
+    fetchGoogleNewsForTier(queries, tier),
+  ])
 
-  console.log(`[news-retrieval] tier=${tier.key} sources: tavily=${tavilyArticles.length} deduped=${deduped.length}`)
+  const combined = [...tavilyArticles, ...googleArticles]
+  const deduped = deduplicateArticlesCrossProvider(combined)
+
+  console.log(`[news-retrieval] tier=${tier.key} sources: tavily=${tavilyArticles.length} google=${googleArticles.length} deduped=${deduped.length}`)
 
   return {
     query: queries.join(" | "),
     articles: deduped.slice(0, 16),
-    sourceBreakdown: { tavily: tavilyArticles.length, after_dedup: deduped.length }
+    sourceBreakdown: { tavily: tavilyArticles.length, google: googleArticles.length, after_dedup: deduped.length }
   }
 }
 
