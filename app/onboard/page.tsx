@@ -636,7 +636,7 @@ function OnboardFlow() {
                     value={input}
                     onFocus={beginConversation}
                     onChange={handleTextareaInput}
-                    onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey && window.innerWidth >= 768) { e.preventDefault(); handleSend() } }}
+                    onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey && !("ontouchstart" in window)) { e.preventDefault(); handleSend() } }}
                     placeholder="Message Rune..."
                     disabled={loading}
                     rows={1}
