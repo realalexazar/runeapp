@@ -770,6 +770,8 @@ async function synthesizeNewsBrief(input: {
     }
   }
 
+  const articleCount = input.articles.length
+
   const prompt = `You are Rune's daily news writer.
 You receive a scoped search instruction and retrieved news items for a specific freshness window.
 Write one substantive intelligence brief with references.
@@ -784,10 +786,11 @@ Return STRICT JSON:
 }
 
 Requirements:
+- Be specific: name the companies, the numbers, the actual news. No vague summaries.
 - Synthesize the important developments, do not list headlines.
 - Respect the freshness framing. If the window is broader than today, write it as a concise status update over that period.
-- Keep quiet-period briefings short and editorially sharp.
-- Keep content to one digestible paragraph plus optional one-sentence why-this-matters.
+- ${articleCount <= 2 ? "You have very few sources. Write 2-3 sentences max. Be short and honest about what happened. Do NOT pad thin material." : "Keep content to one digestible paragraph."}
+- Only include "why_this_matters" if it adds genuinely new insight. If it would just restate the brief, set it to null.
 - Use only the provided retrieved items.
 - References must point to the most relevant items.`
 

@@ -79,7 +79,7 @@ Map the conversation results to slots. Each slot is one of three types:
 
 **lesson** — a 10-day learning curriculum. Required fields: focus, starting_level, curriculum_goal.
 
-Take whatever the user told you they want and map it to 4 slots. Use a 5th only if there's genuinely no way to cover their needs in 4. If they didn't ask for something, don't create a slot for it. If related topics can be one beat, make them one beat.
+Take whatever the user told you they want and map it to slots. The soft target is 4, but use as many as the user's needs actually require (up to 6). Each news slot must be ONE coherent topic with retrieval queries that all point in the same direction. NEVER combine unrelated interests into a single news slot — "consumer trends and Florida sports" is two slots, not one. The retrieval system runs one query set per slot; mixed topics cause one interest to drown out the other. If they didn't ask for something, don't create a slot for it.
 
 ## IV. How you present it to the user
 
