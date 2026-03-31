@@ -78,7 +78,7 @@ export async function generateCurriculumPlan(input: {
   try {
     const resp = await callOpenAIChatCompletion({
       apiKey: OPENAI_API_KEY,
-      model: "gpt-4o-mini",
+      model: "gpt-4o",
       temperature: 0.2,
       messages: [
         { role: "system", content: CURRICULUM_PROMPT },
