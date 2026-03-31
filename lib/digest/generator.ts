@@ -86,14 +86,21 @@ function extractJsonObject(text: string): any | null {
   try {
     return JSON.parse(trimmed)
   } catch {}
-  const start = trimmed.indexOf("{")
-  const end = trimmed.lastIndexOf("}")
+
+  const stripped = trimmed
+    .replace(/^```(?:json)?\s*/i, "")
+    .replace(/\s*```\s*$/, "")
+    .trim()
+  try {
+    return JSON.parse(stripped)
+  } catch {}
+
+  const start = stripped.indexOf("{")
+  const end = stripped.lastIndexOf("}")
   if (start >= 0 && end > start) {
     try {
-      return JSON.parse(trimmed.slice(start, end + 1))
-    } catch {
-      return null
-    }
+      return JSON.parse(stripped.slice(start, end + 1))
+    } catch {}
   }
   return null
 }
@@ -716,14 +723,30 @@ Tone:
   })
 
   const data = await resp.json()
-  const parsed = extractJsonObject(data?.choices?.[0]?.message?.content || "")
-  if (!parsed) {
-    throw new Error("Invalid lesson content JSON")
+  const raw = data?.choices?.[0]?.message?.content || ""
+  const parsed = extractJsonObject(raw)
+
+  if (parsed && parsed.content) {
+    return {
+      title: String(parsed.title || input.day.lesson_title),
+      content: String(parsed.content)
+    }
+  }
+
+  if (raw.length > 100) {
+    const cleaned = raw
+      .replace(/^```(?:json)?\s*/i, "")
+      .replace(/\s*```\s*$/, "")
+      .trim()
+    return {
+      title: input.day.lesson_title,
+      content: cleaned
+    }
   }
 
   return {
-    title: String(parsed.title || input.day.lesson_title),
-    content: String(parsed.content || "")
+    title: input.day.lesson_title,
+    content: input.day.key_points.map((kp: string) => `• ${kp}`).join("\n\n")
   }
 }
 
