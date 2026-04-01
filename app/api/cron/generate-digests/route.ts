@@ -33,6 +33,7 @@ export async function GET(req: Request) {
     }
 
     const results: Array<Record<string, any>> = []
+    let processedCount = 0
 
     for (const config of configs || []) {
       if (!force) {
@@ -114,6 +115,11 @@ export async function GET(req: Request) {
           sent_to: sendResult.recipient,
           module_errors: moduleErrors
         })
+
+        processedCount++
+        if (processedCount < (configs || []).length) {
+          await new Promise((r) => setTimeout(r, 10000))
+        }
       } catch (e: any) {
         results.push({
           user_id: config.user_id,
