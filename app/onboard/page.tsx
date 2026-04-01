@@ -398,12 +398,10 @@ function OnboardFlow() {
     setTyping(true)
 
     try {
-      const currentPhase = recommendationData ? "recommendation" : "conversation"
       const res = await fetch("/api/onboard/chat", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          phase: currentPhase,
           message: msg,
           conversation_history: conversationHistory.current.slice(0, -1)
         })
@@ -492,7 +490,6 @@ function OnboardFlow() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          phase: "recommendation",
           message: systemMessage,
           conversation_history: conversationHistory.current,
           scan_results: scanSummary || null,

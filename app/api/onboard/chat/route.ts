@@ -23,6 +23,19 @@ function normalizeInterests(interests: string[]): string[] {
   return [...new Set(result)]
 }
 
+type OnboardChatPhase = "conversation" | "recommendation" | "complete"
+
+async function getOnboardChatPhase(userId: string): Promise<OnboardChatPhase> {
+  const { data } = await supabaseServiceRole
+    .from("user_profiles")
+    .select("onboard_chat_phase")
+    .eq("user_id", userId)
+    .maybeSingle()
+  const pView = data?.onboard_chat_phase as string | undefined
+  if (pView === "recommendation" || pView === "complete") return pView
+  return "conversation"
+}
+
 const CONVERSATION_PROMPT = `You are Rune. Rune exists to give its users what is essentially a personalized newspaper every morning with exactly the information they are interested in. The user doesn't need to know this, but Rune can track any topic daily, build learning curricula, and curate email inboxes.
 
 You're meeting a new user for the first time. Your only job right now is to understand who they are and what they need.
@@ -109,9 +122,13 @@ Required fields: slot, type, focus, priority_senders (email addresses from scan 
 
 **news** — monitors a beat via search API.
 Required fields: slot, type, focus, retrieval_queries, required_terms, scope_summary, rationale.
+Optional: tracked_entities — string array of proper names the user explicitly tracks (NFL team, ticker, court, company). Example: ["Dallas Cowboys","Cowboys"]. Used at synthesis time: if nothing in the pull clearly concerns them, Rune says so in one honest sentence.
+
 - retrieval_queries: 3-5 search strings using exact phrases, industry jargon, abbreviations. These go directly into the Tavily search API. Each query must approach the topic from a genuinely different angle. If query 1 is "commercial real estate deals", query 2 should NOT be "CRE transactions" (same search, different words). Query 2 should be "CMBS delinquency rates" or "commercial property foreclosure filings" — a different facet of the same beat.
+- PROFESSION LENS (mandatory when professional_context implies a role): retrieval_queries MUST be filtered through that role — not generic Google News fodder. Examples: investment banking + industrials → queries must cite industrials verticals, OEMs, supply chain, grid/transmission, aerospace & defense procurement, chemicals, multi-industry conglomerates, ratings actions on industrial credits — never standalone "emerging technology" or "tech trends" without an industrial anchor (factories, capex, industrials M&A, industrial automation vendors serving manufacturing). Equity research / IB → tie to issuers, sectors, deals, regulatory filings, sell-side catalysts. Law student / attorney → tie to courts, circuits, dockets, bar-relevant institutions — not "breaking news" alone.
 - required_terms: 2-3 AND groups, each an OR list. An article must match at least one term from EVERY group to pass the pre-filter. Be specific:
-  - NEVER use generic terms like "technology", "innovation", "government", "policy", "news", "market", "update" alone. They match everything.
+  - NEVER use generic terms like "technology", "innovation", "government", "policy", "news", "market", "update", "major", "headlines" alone. They match everything.
+  - Slots about "major news" or "what's going on" still need concrete anchors: jurisdiction + institution + domain (e.g. federal courts + SCOTUS + circuit split + ABA), not (news AND legal).
   - First group: specific domain entities (company names, specific sectors, named concepts).
   - Second group: action/event words (deal, launch, ruling, funding, acquisition, breakthrough).
   - If the user's context implies a geographic focus, add a geographic group: ["US", "United States", "American", "federal"] etc.
@@ -240,9 +257,9 @@ export async function POST(req: Request) {
 
     const userId = authResult.data.user.id
     const body = await req.json().catch(() => ({}))
-    const phase = body.phase || "conversation"
 
     if (body.init === true) {
+      const onboardChatPhase = await getOnboardChatPhase(userId)
       const vibes = [
         "Tone: like you just sat down across from someone at a coffee shop.",
         "Tone: short and punchy. Five words if you can.",
@@ -264,7 +281,8 @@ export async function POST(req: Request) {
       return NextResponse.json({
         ok: true,
         rune_message: stripJsonBlock(rawResponse),
-        signal: null
+        signal: null,
+        onboard_chat_phase: onboardChatPhase,
       })
     }
 
@@ -281,7 +299,11 @@ export async function POST(req: Request) {
       { role: "user", content: userMessage }
     ]
 
-    const systemPrompt = phase === "recommendation" ? RECOMMENDATION_CONVERSATIONAL_PROMPT : CONVERSATION_PROMPT
+    const serverPhase = await getOnboardChatPhase(userId)
+    const useRecommendationPrompt = serverPhase === "recommendation"
+    const systemPrompt = useRecommendationPrompt
+      ? RECOMMENDATION_CONVERSATIONAL_PROMPT
+      : CONVERSATION_PROMPT
 
     const rawResponse = await callClaude({
       system: systemPrompt,
@@ -310,6 +332,7 @@ export async function POST(req: Request) {
             : [],
           recommended_config: { raw_intent: signalData },
           onboarding_status: "conversation_done",
+          onboard_chat_phase: "recommendation",
           updated_at: new Date().toISOString()
         }, { onConflict: "user_id" })
 
@@ -317,7 +340,8 @@ export async function POST(req: Request) {
         ok: true,
         rune_message: userFacingMessage,
         signal: "intent_ready",
-        intent_data: signalData
+        intent_data: signalData,
+        onboard_chat_phase: "recommendation" as const,
       })
     }
 
@@ -364,14 +388,16 @@ export async function POST(req: Request) {
         ok: true,
         rune_message: userFacingMessage,
         signal: "recommendation_ready",
-        recommendation_data: mergedData
+        recommendation_data: mergedData,
+        onboard_chat_phase: "recommendation" as const,
       })
     }
 
     return NextResponse.json({
       ok: true,
       rune_message: userFacingMessage,
-      signal: null
+      signal: null,
+      onboard_chat_phase: serverPhase,
     })
 
   } catch (e: any) {

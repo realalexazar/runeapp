@@ -7,6 +7,7 @@ import {
   setLessonState,
   upsertGeneratedContentItem
 } from "@/lib/digest/content-modules"
+import { callClaude } from "@/lib/anthropic/chat"
 import { callOpenAIChatCompletion } from "@/lib/openai/chat"
 import { convert } from "html-to-text"
 import { Readability } from "@mozilla/readability"
@@ -14,6 +15,9 @@ import { JSDOM } from "jsdom"
 
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY
 const TAVILY_API_KEY = process.env.TAVILY_API_KEY
+
+/** Tavily-first: skip Google News RSS for this tier when Tavily already returns enough substantive candidates (reduces thin RSS + redirect links). */
+const MIN_TAVILY_SUBSTANTIVE_TO_SKIP_GOOGLE = 4
 
 type GeneratedModuleItem = {
   module: "news_topics" | "lessons"
@@ -306,6 +310,23 @@ function buildNewsSearchBase(topic: NewsTopicRecord) {
 function buildNewsSearchInstruction(topic: NewsTopicRecord) {
   const mapping = (topic.topic_mapping_json || {}) as Record<string, any>
   return String(mapping.scope_summary || mapping.retrieval_hint || mapping.normalized_topic || topic.topic_text || "").trim()
+}
+
+function getTrackedEntities(topic: NewsTopicRecord): string[] {
+  const mapping = (topic.topic_mapping_json || {}) as Record<string, any>
+  const raw = mapping.tracked_entities
+  if (!Array.isArray(raw)) return []
+  return [...new Set(raw.map((s: unknown) => String(s || "").trim()).filter(Boolean))]
+}
+
+/** Remove legacy / model-leaked "Why this matters" blocks — implications belong in the brief body only. */
+function stripWhyThisMattersArtifacts(text: string): string {
+  let t = text.trim()
+  t = t.replace(/\r\n/g, "\n")
+  t = t.replace(/\n\nWhy this matters:\s*[\s\S]*$/i, "")
+  t = t.replace(/\nWhy this matters:\s*[\s\S]*$/i, "")
+  t = t.replace(/\n\nWhy it matters:\s*[\s\S]*$/i, "")
+  return t.trim()
 }
 
 function getRequiredTermGroups(topic: NewsTopicRecord): string[][] {
@@ -691,7 +712,7 @@ async function synthesizeLessonContent(input: {
   completionSignal: string
   recentLessonTitles: string[]
 }) {
-  if (!OPENAI_API_KEY) {
+  if (!process.env.ANTHROPIC_API_KEY) {
     return {
       title: input.day.lesson_title,
       content: [
@@ -707,7 +728,7 @@ async function synthesizeLessonContent(input: {
 
   const prompt = `You are Rune's daily lesson writer.
 Write today's lesson from a curriculum plan.
-Return STRICT JSON:
+Return STRICT JSON only (no markdown fences, no prose outside the JSON object):
 {
   "title": "string",
   "content": "markdown string"
@@ -741,18 +762,12 @@ Tone:
     recent_lesson_titles: input.recentLessonTitles
   }
 
-  const resp = await callOpenAIChatCompletion({
-    apiKey: OPENAI_API_KEY,
-    model: "gpt-4o",
+  const raw = await callClaude({
+    system: prompt,
+    messages: [{ role: "user", content: JSON.stringify(userPayload) }],
     temperature: 0.4,
-    messages: [
-      { role: "system", content: prompt },
-      { role: "user", content: JSON.stringify(userPayload) }
-    ]
+    maxTokens: 8192
   })
-
-  const data = await resp.json()
-  const raw = data?.choices?.[0]?.message?.content || ""
   const parsed = extractJsonObject(raw)
 
   if (parsed && parsed.content) {
@@ -810,16 +825,15 @@ Return STRICT JSON:
   "content": "string",
   "references": [
     { "title": "string", "url": "string", "source": "string" }
-  ],
-  "why_this_matters": "string | null"
+  ]
 }
 
 Requirements:
 - Be specific: name the companies, the numbers, the actual news. No vague summaries.
+- Put any implication or "why care" in the main "content" — do NOT add a separate "why this matters" section or paragraph; do not end with meta-padding.
 - If the retrieved articles cover different subtopics, present each as a separate brief item — do not force them into one unified narrative. A brief with three distinct items is better than one paragraph pretending three unrelated stories are connected.
 - ${articleCount === 1 ? "You have ONE source. Do not synthesize. Present it directly: 'One notable development: [specific thing]. [Source].' Two sentences max." : articleCount <= 2 ? "You have very few sources. Write 2-3 sentences max. Be short and honest. Do NOT pad thin material." : "Keep content concise and digestible."}
 - Respect the freshness framing. If the window is broader than today, write it as a concise status update over that period.
-- Only include "why_this_matters" if it adds genuinely new insight beyond what the brief already says. If it would just restate or rephrase the content, set it to null.
 - Use only the provided retrieved items.
 - References must point to the most relevant items.`
 
@@ -857,9 +871,9 @@ Requirements:
 
   return {
     title: String(parsed.title || input.topic.topic_text),
-    content: String(parsed.content || ""),
+    content: stripWhyThisMattersArtifacts(String(parsed.content || "")),
     references: Array.isArray(parsed.references) ? parsed.references : [],
-    whyThisMatters: parsed.why_this_matters ? String(parsed.why_this_matters) : null
+    whyThisMatters: null as null
   }
 }
 
@@ -870,13 +884,24 @@ async function unifiedFilterAndSynthesize(input: {
   framingLabel: string
   tierKey: NewsFreshnessTier["key"]
   professionalContext?: string | null
+  trackedEntities?: string[]
 }) {
+  const tracked = (input.trackedEntities || []).filter(Boolean)
+  const trackedClause =
+    tracked.length > 0
+      ? `TRACKED ENTITIES (user explicitly follows these — teams, companies, jurisdictions, names): ${JSON.stringify(tracked)}
+Entity acknowledgment (not optional padding — operational honesty):
+- After choosing relevant articles, check whether the substantive brief clearly relates to at least one tracked entity (by name, clear nickname, or obvious reference).
+- If you have at least one relevant article but NONE relate to any tracked entity, add ONE short final sentence to "content" acknowledging there was no notable coverage of those entities in today's pull. Do not invent coverage.
+- If zero articles are relevant and tracked entities were provided, say there were no notable developments on the topic for today, and in the same brief add one short sentence that nothing in the pull covered those entities.
+- If the brief already covers a tracked entity, do not add a separate "nothing on X" sentence.`
+      : ""
+
   if (!OPENAI_API_KEY) {
     return {
       title: input.topic.topic_text,
       content: `${input.framingLabel}: ${input.candidates.slice(0, 3).map((a) => `${a.title} (${a.source || "Source"})`).join("; ")}`,
       references: input.candidates.slice(0, 3).map((a) => ({ title: a.title, url: a.link, source: a.source || "Source" })),
-      whyThisMatters: null,
       articlesUsed: Math.min(3, input.candidates.length),
     }
   }
@@ -892,6 +917,7 @@ Your job is TWO things in ONE pass:
 2. SYNTHESIZE: From the relevant articles, write a concise intelligence brief.
 
 ${contextClause}
+${trackedClause}
 
 Return STRICT JSON:
 {
@@ -901,7 +927,6 @@ Return STRICT JSON:
   "references": [
     { "title": "string", "url": "string", "source": "string" }
   ],
-  "why_this_matters": "string | null",
   "articles_used": 3
 }
 
@@ -909,14 +934,14 @@ Filtering rules:
 - Each candidate has a source_tier (tier1 = major outlets like Reuters/WSJ/Bloomberg, tier2 = established business press, tier3 = other). When multiple articles cover the same story, prefer higher-tier sources.
 - A candidate is relevant ONLY if a person tracking the exact topic "${input.topic.topic_text}" would consider it a meaningful update.
 - Tangential, adjacent, or loosely-related candidates are NOT relevant. Reject them.
-- If zero candidates are relevant, set relevant_indexes to [] and content to "No notable developments today."
+- If zero candidates are relevant, set relevant_indexes to [] and set content to exactly: "No notable developments on ${input.topic.topic_text} today."
 
 Synthesis rules:
 - Be specific: name the companies, the numbers, the actual developments.
 - If relevant articles cover different subtopics, present each as a separate brief item. Do not force unrelated stories into one narrative.
 - If only 1 article is relevant: two sentences max. Present it directly, don't pad.
 - If 2 articles: 2-3 sentences max.
-- Only include "why_this_matters" if it adds genuinely new insight. If it would restate the brief, set to null.
+- Never output a separate "Why this matters" section, label, or trailing meta-paragraph. Any implication belongs inside the main content as concrete fact, not as a recap of what you already said.
 - References must point to the articles you actually used.`
 
   const resp = await callOpenAIChatCompletion({
@@ -956,16 +981,16 @@ Synthesis rules:
       title: input.topic.topic_text,
       content: `No notable developments on ${input.topic.topic_text} today.`,
       references: [],
-      whyThisMatters: null,
       articlesUsed: 0,
     }
   }
 
   return {
     title: String(parsed.title || input.topic.topic_text),
-    content: String(parsed.content || `No notable developments on ${input.topic.topic_text} today.`),
+    content: stripWhyThisMattersArtifacts(
+      String(parsed.content || `No notable developments on ${input.topic.topic_text} today.`)
+    ),
     references: Array.isArray(parsed.references) ? parsed.references : [],
-    whyThisMatters: parsed.why_this_matters ? String(parsed.why_this_matters) : null,
     articlesUsed: Number(parsed.articles_used || parsed.relevant_indexes?.length || 0),
   }
 }
@@ -1025,20 +1050,32 @@ async function fetchNewsArticlesForTier(topic: NewsTopicRecord, tier: NewsFreshn
   const queries = buildNewsSearchQueries(topic)
   const days = tierKeyToDays(tier.key)
 
-  const [tavilyArticles, googleArticles] = await Promise.all([
-    fetchTavilyNews({ queries, days, maxResults: 10 }),
-    fetchGoogleNewsForTier(queries, tier),
-  ])
+  const tavilyArticles = await fetchTavilyNews({ queries, days, maxResults: 10 })
+  const tavilySubstantiveCount = tavilyArticles.filter(isSubstantiveArticle).length
+
+  let googleArticles: NewsArticle[] = []
+  if (tavilySubstantiveCount < MIN_TAVILY_SUBSTANTIVE_TO_SKIP_GOOGLE) {
+    googleArticles = await fetchGoogleNewsForTier(queries, tier)
+  }
 
   const combined = [...tavilyArticles, ...googleArticles]
   const deduped = deduplicateArticlesCrossProvider(combined)
 
-  console.log(`[news-retrieval] tier=${tier.key} sources: tavily=${tavilyArticles.length} google=${googleArticles.length} deduped=${deduped.length}`)
+  const skippedGoogle = tavilySubstantiveCount >= MIN_TAVILY_SUBSTANTIVE_TO_SKIP_GOOGLE
+  console.log(
+    `[news-retrieval] tier=${tier.key} tavily=${tavilyArticles.length} substantive=${tavilySubstantiveCount} google=${googleArticles.length}${skippedGoogle ? " (rss skipped)" : ""} deduped=${deduped.length}`
+  )
 
   return {
     query: queries.join(" | "),
     articles: deduped.slice(0, 16),
-    sourceBreakdown: { tavily: tavilyArticles.length, google: googleArticles.length, after_dedup: deduped.length }
+    sourceBreakdown: {
+      tavily: tavilyArticles.length,
+      tavily_substantive: tavilySubstantiveCount,
+      google: googleArticles.length,
+      google_rss_skipped: skippedGoogle,
+      after_dedup: deduped.length,
+    },
   }
 }
 
@@ -1401,20 +1438,23 @@ export async function generateDailyNewsTopics(input: {
         }
       }
 
-      let title = topic.topic_text
-      let content = `No notable developments on ${topic.topic_text} this week.`
+      const canonicalTopicLabel = topic.topic_text
+      let title = canonicalTopicLabel
+      let content = `No notable developments on ${canonicalTopicLabel} today.`
       let metadata: Record<string, any> = {
-        topic_text: topic.topic_text,
+        canonical_topic_label: canonicalTopicLabel,
+        topic_text: canonicalTopicLabel,
         timeframe: topic.timeframe || "24h",
         query: buildNewsSearchBase(topic),
         references: [],
         freshness_tier: "empty",
-        framing_label: `No notable developments on ${topic.topic_text} this week.`,
+        framing_label: `No notable developments on ${canonicalTopicLabel} today.`,
         empty_state: true,
         retrieval_funnel: retrievalFunnel
       }
 
       if (selectedTier && allCandidates.length > 0) {
+        const trackedEntities = getTrackedEntities(topic)
         const brief = await unifiedFilterAndSynthesize({
           topic,
           searchInstruction,
@@ -1422,14 +1462,12 @@ export async function generateDailyNewsTopics(input: {
           framingLabel: selectedTier.framingLabel,
           tierKey: selectedTier.key,
           professionalContext,
+          trackedEntities,
         })
-        title = brief.title
-        const framedContent = selectedTier.key === "24h"
-          ? brief.content
-          : `${selectedTier.framingLabel}: ${brief.content}`
-        content = brief.whyThisMatters
-          ? `${framedContent}\n\nWhy this matters: ${brief.whyThisMatters}`
-          : framedContent
+        title = canonicalTopicLabel
+        const rawSection =
+          selectedTier.key === "24h" ? brief.content : `${selectedTier.framingLabel}: ${brief.content}`
+        content = stripWhyThisMattersArtifacts(rawSection)
         metadata = {
           ...metadata,
           query: selectedQuery,
@@ -1442,7 +1480,8 @@ export async function generateDailyNewsTopics(input: {
           framing_label: selectedTier.framingLabel,
           empty_state: false,
           retrieval_links: allCandidates.slice(0, 15).map((article) => article.resolvedUrl || article.link),
-          retrieval_funnel: retrievalFunnel
+          retrieval_funnel: retrievalFunnel,
+          tracked_entities: trackedEntities.length > 0 ? trackedEntities : undefined,
         }
       }
 

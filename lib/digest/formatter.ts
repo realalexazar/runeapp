@@ -129,14 +129,19 @@ export async function buildUnifiedDigest(input: {
     })
   }
 
-  const newsItems = ((newsRows || []) as GeneratedModuleRow[]).map((row) => ({
-    title: row.title,
-    content: row.metadata?.empty_state
-      ? `No notable developments on ${row.metadata?.topic_text || row.title} today.`
-      : row.content,
-    references: Array.isArray(row.metadata?.references) ? row.metadata!.references : [],
-    empty: !!row.metadata?.empty_state
-  }))
+  const newsItems = ((newsRows || []) as GeneratedModuleRow[]).map((row) => {
+    const canonical =
+      String(row.metadata?.canonical_topic_label || row.metadata?.topic_text || row.title || "").trim() ||
+      row.title
+    return {
+      title: canonical,
+      content: row.metadata?.empty_state
+        ? `No notable developments on ${canonical} today.`
+        : row.content,
+      references: Array.isArray(row.metadata?.references) ? row.metadata!.references : [],
+      empty: !!row.metadata?.empty_state
+    }
+  })
 
   const emptyTopics = newsItems.filter((item) => item.empty)
   const activeTopics = newsItems.filter((item) => !item.empty)
@@ -145,7 +150,7 @@ export async function buildUnifiedDigest(input: {
     const collapsedTitle = emptyTopics.map((t) => t.title).join(" and ")
     const collapsedItem = {
       title: collapsedTitle,
-      content: `Quiet day on ${collapsedTitle}.`,
+      content: `No notable developments today for these topics: ${collapsedTitle}.`,
       references: [] as any[],
       empty: true,
     }
@@ -216,8 +221,9 @@ export function renderDigestHtml(digest: UnifiedDigest): string {
       const items = section.items.map((item) => {
         if (item.empty) {
           return `
-            <div style="margin-bottom:10px;color:#b7b7c9;font-size:14px;">
-              <span style="font-weight:600;color:#e9e9f1;">${escapeHtml(item.title)}</span> — No notable developments today.
+            <div style="margin-bottom:16px;">
+              <div style="font-weight:600;color:#ffffff;font-size:15px;">${escapeHtml(item.title)}</div>
+              <p style="color:#b7b7c9;font-size:14px;line-height:1.55;margin:6px 0 0 0;">${escapeHtml(item.content)}</p>
             </div>`
         }
         return `
@@ -280,7 +286,7 @@ export function renderDigestText(digest: UnifiedDigest): string {
     if (section.type === "daily_news_topics") {
       for (const item of section.items) {
         if (item.empty) {
-          parts.push(`${item.title} — No notable developments today.`)
+          parts.push(`${item.title}: ${item.content}`)
           parts.push("")
           continue
         }

@@ -41,47 +41,6 @@ export async function POST(req: Request) {
     const newsSlots = slots.filter((s) => s.type === "news")
     const lessonSlots = slots.filter((s) => s.type === "lesson")
 
-    // 1. Store approved config + mark complete
-    const { error: profileErr } = await supabaseServiceRole
-      .from("user_profiles")
-      .update({
-        approved_config: config,
-        onboarding_status: "complete",
-        onboarding_completed_at: now,
-        updated_at: now,
-      })
-      .eq("user_id", user.id)
-
-    if (profileErr) {
-      console.error("Failed to update user_profiles:", profileErr)
-      return NextResponse.json({ ok: false, error: profileErr.message }, { status: 500 })
-    }
-
-    // 2. Upsert digest_configs
-    const preferences = config.digest_preferences || {}
-    const { error: digestErr } = await supabaseServiceRole
-      .from("digest_configs")
-      .upsert({
-        user_id: user.id,
-        cadence: "daily",
-        send_time: [preferences.delivery_time || "07:00"],
-        timezone: preferences.timezone || "America/New_York",
-        style: "morning-brief",
-        rune_name: null,
-        module_flags: {
-          enable_newsletter_digest: emailSlots.length > 0,
-          enable_daily_news_topics: newsSlots.length > 0,
-          enable_daily_lessons: lessonSlots.length > 0,
-        },
-        updated_at: now,
-      }, { onConflict: "user_id", ignoreDuplicates: false })
-
-    if (digestErr) {
-      console.error("Failed to upsert digest_configs:", digestErr)
-      return NextResponse.json({ ok: false, error: digestErr.message }, { status: 500 })
-    }
-
-    // 3. Validate news slots before writing anything
     const slotErrors: string[] = []
     for (const slot of newsSlots) {
       if (!Array.isArray(slot.retrieval_queries) || slot.retrieval_queries.length === 0) {
@@ -96,147 +55,129 @@ export async function POST(req: Request) {
       return NextResponse.json({ ok: false, error: "Invalid news slot config", details: slotErrors }, { status: 400 })
     }
 
-    // 4. News topics — one record per news slot
-    const newsErrors: string[] = []
-    if (newsSlots.length > 0) {
-      await supabaseServiceRole
-        .from("user_news_topics")
-        .update({ active: false, updated_at: now })
-        .eq("user_id", user.id)
-        .eq("active", true)
+    const curriculumPlans =
+      lessonSlots.length > 0
+        ? await Promise.all(
+            lessonSlots.map((slot) =>
+              generateCurriculumPlan({
+                topic: slot.focus,
+                startingLevel: slot.starting_level || "beginner",
+                curriculumGoal: slot.curriculum_goal || null,
+                scopeSummary: slot.scope_summary || null,
+              })
+            )
+          )
+        : []
 
-      for (const slot of newsSlots) {
-        const { data: newsTopic, error: newsErr } = await supabaseServiceRole
-          .from("user_news_topics")
-          .insert({
-            user_id: user.id,
-            topic_text: slot.focus,
-            topic_raw_text: slot.focus,
-            timeframe: "24h",
-            topic_mapping_json: {
-              normalized_topic: slot.focus,
-              scope_summary: slot.scope_summary || slot.focus,
-              retrieval_queries: slot.retrieval_queries,
-              required_terms: slot.required_terms,
-              retrieval_hint: slot.focus,
-            },
-            active: true,
-          })
-          .select("id")
-          .single()
+    const newsTopicsPayload = newsSlots.map((slot) => ({
+      topic_text: slot.focus,
+      topic_raw_text: slot.focus,
+      timeframe: "24h",
+      topic_mapping_json: {
+        normalized_topic: slot.focus,
+        scope_summary: slot.scope_summary || slot.focus,
+        retrieval_queries: slot.retrieval_queries,
+        required_terms: slot.required_terms,
+        retrieval_hint: slot.focus,
+        tracked_entities: Array.isArray(slot.tracked_entities) ? slot.tracked_entities : [],
+      },
+    }))
 
-        if (newsErr) {
-          console.error(`Failed to insert news topic "${slot.focus}":`, newsErr)
-          newsErrors.push(`News topic "${slot.focus}": ${newsErr.message}`)
-        } else if (newsTopic) {
-          createdIds[`news_topic_slot_${slot.slot}`] = newsTopic.id
-        }
-      }
+    const lessonTopicsPayload: Record<string, unknown>[] = []
+    for (let i = 0; i < lessonSlots.length; i++) {
+      const slot = lessonSlots[i]
+      const rawLevel = slot.starting_level || "beginner"
+      const normalizedLevel = normalizeStartingLevel(rawLevel)
+      const curriculumGoal = slot.curriculum_goal || null
+      const curriculumPlan = curriculumPlans[i]
+
+      lessonTopicsPayload.push({
+        topic_text: slot.focus,
+        topic_raw_text: slot.focus,
+        curriculum_goal: curriculumGoal,
+        starting_level: normalizedLevel,
+        topic_mapping_json: {
+          normalized_topic: slot.focus,
+          scope_summary: curriculumGoal || slot.focus,
+          starting_level: rawLevel,
+          curriculum_plan: curriculumPlan,
+          lesson_state: {
+            status: "active",
+            next_day: 1,
+            last_generated_date: null,
+            paused_at: null,
+            completed_at: null,
+          },
+        },
+      })
     }
 
-    // 5. Lesson topics — parallel curriculum generation
-    const lessonErrors: string[] = []
-    if (lessonSlots.length > 0) {
-      await supabaseServiceRole
-        .from("user_lesson_topics")
-        .update({ active: false, updated_at: now })
-        .eq("user_id", user.id)
-        .eq("active", true)
-
-      const curriculumPlans = await Promise.all(
-        lessonSlots.map((slot) =>
-          generateCurriculumPlan({
-            topic: slot.focus,
-            startingLevel: slot.starting_level || "beginner",
-            curriculumGoal: slot.curriculum_goal || null,
-            scopeSummary: slot.scope_summary || null,
-          })
-        )
-      )
-
-      for (let i = 0; i < lessonSlots.length; i++) {
-        const slot = lessonSlots[i]
-        const rawLevel = slot.starting_level || "beginner"
-        const normalizedLevel = normalizeStartingLevel(rawLevel)
-        const curriculumGoal = slot.curriculum_goal || null
-        const curriculumPlan = curriculumPlans[i]
-
-        const { data: lessonTopic, error: lessonErr } = await supabaseServiceRole
-          .from("user_lesson_topics")
-          .insert({
-            user_id: user.id,
-            topic_text: slot.focus,
-            topic_raw_text: slot.focus,
-            curriculum_goal: curriculumGoal,
-            starting_level: normalizedLevel,
-            topic_mapping_json: {
-              normalized_topic: slot.focus,
-              scope_summary: curriculumGoal || slot.focus,
-              starting_level: rawLevel,
-              curriculum_plan: curriculumPlan,
-              lesson_state: {
-                status: "active",
-                next_day: 1,
-                last_generated_date: null,
-                paused_at: null,
-                completed_at: null,
-              },
-            },
-            active: true,
-          })
-          .select("id")
-          .single()
-
-        if (lessonErr) {
-          console.error(`Failed to insert lesson topic "${slot.focus}":`, lessonErr)
-          lessonErrors.push(`Lesson topic "${slot.focus}": ${lessonErr.message}`)
-        } else if (lessonTopic) {
-          createdIds[`lesson_topic_slot_${slot.slot}`] = lessonTopic.id
-        }
-      }
+    const preferences = config.digest_preferences || {}
+    const digestPayload = {
+      cadence: "daily",
+      send_time: [preferences.delivery_time || "07:00"],
+      timezone: preferences.timezone || "America/New_York",
+      style: "morning-brief",
+      module_flags: {
+        enable_newsletter_digest: emailSlots.length > 0,
+        enable_daily_news_topics: newsSlots.length > 0,
+        enable_daily_lessons: lessonSlots.length > 0,
+      },
     }
 
-    // 6. Email / inbox curation
+    let newsletterSenders: string[] = []
+    let inboxAddresses: string[] = []
     if (emailSlots.length > 0) {
       const allPrioritySenders = emailSlots.flatMap((s) => s.priority_senders || [])
       const inboxPlan = config.inbox_curation_plan || {}
       const planSenders = inboxPlan.priority_senders || []
       const combined = [...new Set([...allPrioritySenders, ...planSenders])]
-
-      if (combined.length > 0) {
-        const upserts = combined.map((sender: string) => ({
-          user_id: user.id,
-          sender_key: sender,
-          selected: true,
-          updated_at: now,
-        }))
-
-        await supabaseServiceRole
-          .from("user_newsletter_selections")
-          .upsert(upserts, { onConflict: "user_id,sender_key", ignoreDuplicates: false })
-
-        await supabaseServiceRole
-          .from("inbox_analysis")
-          .update({ disposition: "priority" })
-          .eq("user_id", user.id)
-          .in("sender_address", combined)
-
-        createdIds.newsletter_selections_count = combined.length
-      }
+      newsletterSenders = combined
+      inboxAddresses = combined
+      createdIds.newsletter_selections_count = combined.length
     }
 
-    const allErrors = [...newsErrors, ...lessonErrors]
-    if (allErrors.length > 0) {
-      return NextResponse.json({
-        ok: false,
-        error: "Some slots failed to save",
-        details: allErrors,
-        created_ids: createdIds,
-      }, { status: 207 })
+    const { data: rpcData, error: rpcError } = await supabaseServiceRole.rpc("commit_onboard_approval", {
+      p_user_id: user.id,
+      p_now: now,
+      p_approved_config: config,
+      p_digest: digestPayload,
+      p_news_topics: newsTopicsPayload,
+      p_lesson_topics: lessonTopicsPayload,
+      p_newsletter_senders: newsletterSenders.length > 0 ? newsletterSenders : null,
+      p_inbox_priority_addresses: inboxAddresses.length > 0 ? inboxAddresses : null,
+    })
+
+    if (rpcError) {
+      console.error("commit_onboard_approval failed:", rpcError)
+      return NextResponse.json(
+        { ok: false, error: rpcError.message || "Database transaction failed" },
+        { status: 500 }
+      )
+    }
+
+    const result = rpcData as {
+      ok?: boolean
+      news_topic_ids?: string[]
+      lesson_topic_ids?: string[]
+      newsletter_selection_count?: number
+    } | null
+
+    const newsIds = Array.isArray(result?.news_topic_ids) ? result!.news_topic_ids : []
+    const lessonIds = Array.isArray(result?.lesson_topic_ids) ? result!.lesson_topic_ids : []
+
+    newsSlots.forEach((slot, i) => {
+      if (newsIds[i]) createdIds[`news_topic_slot_${slot.slot}`] = newsIds[i] as string
+    })
+    lessonSlots.forEach((slot, i) => {
+      if (lessonIds[i]) createdIds[`lesson_topic_slot_${slot.slot}`] = lessonIds[i] as string
+    })
+
+    if (typeof result?.newsletter_selection_count === "number") {
+      createdIds.newsletter_selections_count = result.newsletter_selection_count
     }
 
     return NextResponse.json({ ok: true, created_ids: createdIds })
-
   } catch (e: any) {
     console.error("Error approving onboarding config:", e)
     return NextResponse.json({ ok: false, error: String(e.message || e) }, { status: 500 })

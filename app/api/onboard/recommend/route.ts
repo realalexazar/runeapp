@@ -69,6 +69,7 @@ export async function POST(req: Request) {
       .update({
         recommended_config: assembledConfig,
         onboarding_status: "config_ready",
+        onboard_chat_phase: "recommendation",
         updated_at: new Date().toISOString(),
       })
       .eq("user_id", user.id)

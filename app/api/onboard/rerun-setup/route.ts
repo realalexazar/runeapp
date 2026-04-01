@@ -17,6 +17,20 @@ export async function POST() {
   }
 
   try {
+    const now = new Date().toISOString()
+    const { error: profileResetErr } = await supabaseServiceRole
+      .from("user_profiles")
+      .update({
+        onboard_chat_phase: "conversation",
+        onboarding_status: "conversation_done",
+        approved_config: null,
+        recommended_config: null,
+        onboarding_completed_at: null,
+        updated_at: now,
+      })
+      .eq("user_id", user.id)
+    if (profileResetErr) throw profileResetErr
+
     // 1) Remove module topic selections
     const { error: newsTopicErr } = await supabaseServiceRole
       .from("user_news_topics")
