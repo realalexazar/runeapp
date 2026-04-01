@@ -4,6 +4,25 @@ import { supabaseServiceRole } from "@/lib/supabase/service"
 import { callClaude } from "@/lib/anthropic/chat"
 import { callOpenAIChatCompletion } from "@/lib/openai/chat"
 
+function normalizeInterests(interests: string[]): string[] {
+  const result: string[] = []
+  for (const item of interests) {
+    if (item.startsWith("[")) {
+      try {
+        const parsed = JSON.parse(item)
+        if (Array.isArray(parsed)) { result.push(...parsed); continue }
+      } catch {}
+    }
+    const parts = item.split(/,\s*(?:and\s+)?|;\s*|\s+and\s+/).map((s) => s.trim()).filter(Boolean)
+    if (parts.length > 1) {
+      result.push(...parts)
+    } else {
+      result.push(item)
+    }
+  }
+  return [...new Set(result)]
+}
+
 const CONVERSATION_PROMPT = `You are Rune. Rune exists to give its users what is essentially a personalized newspaper every morning with exactly the information they are interested in. The user doesn't need to know this, but Rune can track any topic daily, build learning curricula, and curate email inboxes.
 
 You're meeting a new user for the first time. Your only job right now is to understand who they are and what they need.
@@ -39,12 +58,14 @@ Close naturally and transition to the inbox connection (or to wrapping up if the
   "intent_ready": true,
   "professional_context": "1-2 sentence summary",
   "inferred_expertise_level": "junior | mid | senior",
-  "occupation_interests": ["topic 1", "topic 2"],
+  "occupation_interests": ["topic 1", "topic 2"],  // MUST be atomic — one interest per string, never comma-separated
   "free_interest": "topic or null",
   "learning_topic": { "topic": "string or null", "starting_level": "string or null", "goal": "string or null" },
   "inbox_preferences": { "wants_inbox_curation": true, "email_types_wanted": ["type1"], "notes": "specifics" }
 }
 \`\`\`
+
+CRITICAL: Each entry in occupation_interests must be ONE atomic topic. Never combine multiple interests into one string. "AI race, quantum computing, Iran conflict" is WRONG — it must be ["AI race", "quantum computing", "Iran conflict"]. Same for free_interest — one topic only.
 
 Set fields to null when not wanted. NEVER mention the JSON to the user.`
 
@@ -272,10 +293,11 @@ export async function POST(req: Request) {
     const userFacingMessage = stripJsonBlock(rawResponse)
 
     if (signalType === "intent") {
-      const interests = [
+      const rawInterestsFromIntent = [
         ...(signalData!.occupation_interests || []),
         ...(signalData!.free_interest ? [signalData!.free_interest] : [])
       ]
+      const interests = normalizeInterests(rawInterestsFromIntent)
 
       await supabaseServiceRole
         .from("user_profiles")
@@ -302,23 +324,27 @@ export async function POST(req: Request) {
     if (signalType === "recommendation") {
       const { data: profile } = await supabaseServiceRole
         .from("user_profiles")
-        .select("recommended_config")
+        .select("recommended_config, stay_on_top_of")
         .eq("user_id", userId)
         .single()
 
       const intentData = profile?.recommended_config?.raw_intent || {}
+      const scanSummary = body.scan_results || null
 
-      let scanSummary = null
-      try {
-        const scanMsg = messages.find((m) => m.role === "user" && m.content.includes("[SYSTEM: Inbox scan complete"))
-        if (scanMsg) {
-          const jsonStart = scanMsg.content.indexOf("{")
-          const jsonEnd = scanMsg.content.indexOf("]\n\nNow generate")
-          if (jsonStart >= 0 && jsonEnd > jsonStart) {
-            scanSummary = JSON.parse(scanMsg.content.slice(jsonStart, jsonEnd + 1))
-          }
+      const rawInterests = Array.isArray(profile?.stay_on_top_of) ? profile.stay_on_top_of : []
+      const normalizedInterests = normalizeInterests(rawInterests)
+      if (normalizedInterests.length !== rawInterests.length) {
+        await supabaseServiceRole
+          .from("user_profiles")
+          .update({ stay_on_top_of: normalizedInterests, updated_at: new Date().toISOString() })
+          .eq("user_id", userId)
+
+        if (intentData.occupation_interests) {
+          intentData.occupation_interests = normalizedInterests.filter(
+            (i: string) => !intentData.free_interest || i !== intentData.free_interest
+          )
         }
-      } catch {}
+      }
 
       const technicalConfig = await generateTechnicalConfig(intentData, scanSummary)
 

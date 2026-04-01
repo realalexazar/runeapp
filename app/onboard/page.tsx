@@ -484,7 +484,7 @@ function OnboardFlow() {
     setTyping(true)
 
     const systemMessage = scanSummary
-      ? `[SYSTEM: Inbox scan complete. Results:\n${JSON.stringify(scanSummary)}\n\nNow generate the user's recommendation. Address them directly. Show them what you'd build based on everything in this conversation plus the inbox results. End with the configuration JSON block.]`
+      ? `[SYSTEM: Inbox scan complete. Now generate the user's recommendation. Address them directly. Show them what you'd build based on everything in this conversation plus the inbox results. End with the configuration JSON block.]`
       : `[SYSTEM: User does not want inbox curation OR inbox scan failed. No inbox data available.\n\nNow generate the user's recommendation. Address them directly. Show them what you'd build based on everything in this conversation. End with the configuration JSON block.]`
 
     try {
@@ -494,7 +494,8 @@ function OnboardFlow() {
         body: JSON.stringify({
           phase: "recommendation",
           message: systemMessage,
-          conversation_history: conversationHistory.current
+          conversation_history: conversationHistory.current,
+          scan_results: scanSummary || null,
         })
       })
       const data = await res.json()
