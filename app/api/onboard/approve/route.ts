@@ -81,7 +81,23 @@ export async function POST(req: Request) {
       return NextResponse.json({ ok: false, error: digestErr.message }, { status: 500 })
     }
 
-    // 3. News topics — one record per news slot
+    // 3. Validate news slots before writing anything
+    const slotErrors: string[] = []
+    for (const slot of newsSlots) {
+      if (!Array.isArray(slot.retrieval_queries) || slot.retrieval_queries.length === 0) {
+        slotErrors.push(`News slot "${slot.focus}" is missing retrieval_queries`)
+      }
+      if (!Array.isArray(slot.required_terms) || slot.required_terms.length === 0) {
+        slotErrors.push(`News slot "${slot.focus}" is missing required_terms`)
+      }
+    }
+    if (slotErrors.length > 0) {
+      console.error("Slot validation failed:", slotErrors)
+      return NextResponse.json({ ok: false, error: "Invalid news slot config", details: slotErrors }, { status: 400 })
+    }
+
+    // 4. News topics — one record per news slot
+    const newsErrors: string[] = []
     if (newsSlots.length > 0) {
       await supabaseServiceRole
         .from("user_news_topics")
@@ -100,8 +116,8 @@ export async function POST(req: Request) {
             topic_mapping_json: {
               normalized_topic: slot.focus,
               scope_summary: slot.scope_summary || slot.focus,
-              retrieval_queries: slot.retrieval_queries || [slot.focus],
-              required_terms: slot.required_terms || [],
+              retrieval_queries: slot.retrieval_queries,
+              required_terms: slot.required_terms,
               retrieval_hint: slot.focus,
             },
             active: true,
@@ -111,13 +127,15 @@ export async function POST(req: Request) {
 
         if (newsErr) {
           console.error(`Failed to insert news topic "${slot.focus}":`, newsErr)
+          newsErrors.push(`News topic "${slot.focus}": ${newsErr.message}`)
         } else if (newsTopic) {
           createdIds[`news_topic_slot_${slot.slot}`] = newsTopic.id
         }
       }
     }
 
-    // 4. Lesson topics — one record per lesson slot
+    // 5. Lesson topics — parallel curriculum generation
+    const lessonErrors: string[] = []
     if (lessonSlots.length > 0) {
       await supabaseServiceRole
         .from("user_lesson_topics")
@@ -125,17 +143,23 @@ export async function POST(req: Request) {
         .eq("user_id", user.id)
         .eq("active", true)
 
-      for (const slot of lessonSlots) {
+      const curriculumPlans = await Promise.all(
+        lessonSlots.map((slot) =>
+          generateCurriculumPlan({
+            topic: slot.focus,
+            startingLevel: slot.starting_level || "beginner",
+            curriculumGoal: slot.curriculum_goal || null,
+            scopeSummary: slot.scope_summary || null,
+          })
+        )
+      )
+
+      for (let i = 0; i < lessonSlots.length; i++) {
+        const slot = lessonSlots[i]
         const rawLevel = slot.starting_level || "beginner"
         const normalizedLevel = normalizeStartingLevel(rawLevel)
         const curriculumGoal = slot.curriculum_goal || null
-
-        const curriculumPlan = await generateCurriculumPlan({
-          topic: slot.focus,
-          startingLevel: rawLevel,
-          curriculumGoal,
-          scopeSummary: slot.scope_summary || null,
-        })
+        const curriculumPlan = curriculumPlans[i]
 
         const { data: lessonTopic, error: lessonErr } = await supabaseServiceRole
           .from("user_lesson_topics")
@@ -165,13 +189,14 @@ export async function POST(req: Request) {
 
         if (lessonErr) {
           console.error(`Failed to insert lesson topic "${slot.focus}":`, lessonErr)
+          lessonErrors.push(`Lesson topic "${slot.focus}": ${lessonErr.message}`)
         } else if (lessonTopic) {
           createdIds[`lesson_topic_slot_${slot.slot}`] = lessonTopic.id
         }
       }
     }
 
-    // 5. Email / inbox curation
+    // 6. Email / inbox curation
     if (emailSlots.length > 0) {
       const allPrioritySenders = emailSlots.flatMap((s) => s.priority_senders || [])
       const inboxPlan = config.inbox_curation_plan || {}
@@ -198,6 +223,16 @@ export async function POST(req: Request) {
 
         createdIds.newsletter_selections_count = combined.length
       }
+    }
+
+    const allErrors = [...newsErrors, ...lessonErrors]
+    if (allErrors.length > 0) {
+      return NextResponse.json({
+        ok: false,
+        error: "Some slots failed to save",
+        details: allErrors,
+        created_ids: createdIds,
+      }, { status: 207 })
     }
 
     return NextResponse.json({ ok: true, created_ids: createdIds })
