@@ -1,4 +1,6 @@
-const OPENAI_API_URL = "https://api.openai.com/v1/chat/completions"
+const OPENAI_API_URL = process.env.OPENROUTER_API_KEY
+  ? "https://openrouter.ai/api/v1/chat/completions"
+  : "https://api.openai.com/v1/chat/completions"
 const CONNECT_TIMEOUT_MS = 30000
 const MAX_ATTEMPTS = 3
 const BASE_BACKOFF_MS = 1200
@@ -46,11 +48,12 @@ export async function callOpenAIChatCompletion(input: {
   for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
     try {
       const dispatcher = await getOpenAiDispatcher()
+      const apiKey = process.env.OPENROUTER_API_KEY || input.apiKey
       const resp = await fetch(OPENAI_API_URL, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          Authorization: `Bearer ${input.apiKey}`
+          Authorization: `Bearer ${apiKey}`
         },
         body: JSON.stringify({
           model: input.model,
