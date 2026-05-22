@@ -232,6 +232,7 @@ export async function POST(req: Request) {
     // Generate LLM summaries only for valid items
     const summaries = validItems.length > 0
       ? await summarizeBatch(
+          user.id,
           validItems, 
           userStyle,
           batchSizeOverride || BATCH_SIZE,
@@ -338,6 +339,7 @@ export async function POST(req: Request) {
  * Phase 4: Batching by character count instead of item count
  */
 async function summarizeBatch(
+  userId: string,
   items: Array<{ id: string; sender_key: string | null; newsletter_name: string | null; subject: string; content: string; links: string[] }>,
   style: string,
   batchSize: number = BATCH_SIZE,
@@ -372,7 +374,7 @@ async function summarizeBatch(
 
   // Single batch - process directly
   if (chunks.length === 1) {
-    return await summarizeBatchSingle(chunks[0], 0, style, model)
+    return await summarizeBatchSingle(userId, chunks[0], 0, style, model)
   }
 
   // Multiple batches - process concurrently
@@ -382,7 +384,7 @@ async function summarizeBatch(
     limit(async () => {
       const currentOffset = offset
       offset += chunk.length
-      return await summarizeBatchSingle(chunk, currentOffset, style, model)
+      return await summarizeBatchSingle(userId, chunk, currentOffset, style, model)
     })
   )
 
@@ -394,6 +396,7 @@ async function summarizeBatch(
  * Summarize a single batch of items (one LLM call)
  */
 async function summarizeBatchSingle(
+  userId: string,
   items: Array<{ id: string; sender_key: string | null; newsletter_name: string | null; subject: string; content: string; links: string[] }>,
   offset: number,
   style: string,
@@ -509,7 +512,20 @@ ${itemsText}`
       messages: [
         { role: "system", content: systemPrompt },
         { role: "user", content: userPrompt }
-      ]
+      ],
+      telemetry: {
+        userId,
+        callSiteName: "digest.dev_generate_summaries.batch",
+        filePath: "app/api/digest/generate-summaries/route.ts",
+        functionName: "summarizeBatchSingle",
+        validationStatus: "regex",
+        outputShapeName: "NewsletterSummaryArray",
+        metadata: {
+          batch_item_count: items.length,
+          offset,
+          style
+        }
+      }
     })
 
     const data = await response.json()

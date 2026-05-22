@@ -116,7 +116,7 @@ export async function POST(req: Request) {
     }
 
     // Layer 3: Batch LLM Classification
-    const llmResults = await classifyBatch(candidates)
+    const llmResults = await classifyBatch(candidates, { userId: user.id })
 
     // Combine results
     const allResults: Array<{

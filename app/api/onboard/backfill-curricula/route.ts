@@ -35,6 +35,8 @@ export async function GET(req: Request) {
 
       try {
         const plan = await generateCurriculumPlan({
+          userId: topic.user_id,
+          slotId: topic.id,
           topic: topic.topic_text || topic.topic_raw_text || "General topic",
           startingLevel: topic.starting_level || mapping.starting_level || "beginner",
           curriculumGoal: topic.curriculum_goal || mapping.scope_summary || null,

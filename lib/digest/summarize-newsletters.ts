@@ -61,7 +61,7 @@ export async function summarizeNewslettersForUser(userId: string): Promise<{ ok:
 
   let llmSummaries: Array<{ item_id: string; summary: string }> = []
   if (valid.length > 0 && OPENAI_API_KEY) {
-    llmSummaries = await batchSummarize(valid, style)
+    llmSummaries = await batchSummarize(userId, valid, style)
   }
 
   const sparseSummaries = sparse.map(item => ({
@@ -87,6 +87,7 @@ export async function summarizeNewslettersForUser(userId: string): Promise<{ ok:
 }
 
 async function batchSummarize(
+  userId: string,
   items: Array<{ id: string; sender_key: string | null; newsletter_name: string | null; subject: string; content: string; links: string[] }>,
   style: string
 ): Promise<Array<{ item_id: string; summary: string }>> {
@@ -108,13 +109,14 @@ async function batchSummarize(
 
   const results: Array<{ item_id: string; summary: string }> = []
   for (const chunk of chunks) {
-    const chunkResults = await summarizeChunk(chunk, style)
+    const chunkResults = await summarizeChunk(userId, chunk, style)
     results.push(...chunkResults)
   }
   return results
 }
 
 async function summarizeChunk(
+  userId: string,
   items: Array<{ id: string; sender_key: string | null; newsletter_name: string | null; subject: string; content: string; links: string[] }>,
   style: string
 ): Promise<Array<{ item_id: string; summary: string }>> {
@@ -143,6 +145,18 @@ Each key must be the exact item ID from BEGIN_ITEM markers. Example:
       { role: "system", content: systemPrompt },
       { role: "user", content: `Summarize:\n\n${itemsText}` },
     ],
+    telemetry: {
+      userId,
+      callSiteName: "digest.newsletters.summarize_chunk",
+      filePath: "lib/digest/summarize-newsletters.ts",
+      functionName: "summarizeChunk",
+      validationStatus: "regex",
+      outputShapeName: "NewsletterSummaryMap",
+      metadata: {
+        batch_item_count: items.length,
+        style
+      }
+    }
   })
 
   const data = await resp.json()

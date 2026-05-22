@@ -9,6 +9,7 @@ import {
 } from "@/lib/digest/content-modules"
 import { callClaude } from "@/lib/anthropic/chat"
 import { callOpenAIChatCompletion } from "@/lib/openai/chat"
+import { recordExternalApiCall } from "@/lib/ai/external-api-telemetry"
 import { convert } from "html-to-text"
 import { Readability } from "@mozilla/readability"
 import { JSDOM } from "jsdom"
@@ -201,6 +202,9 @@ function deduplicateArticlesCrossProvider(articles: NewsArticle[]) {
 }
 
 async function fetchTavilyNews(input: {
+  userId?: string | null
+  runId?: string | null
+  slotId?: string | null
   queries: string[]
   days: number
   maxResults?: number
@@ -214,45 +218,111 @@ async function fetchTavilyNews(input: {
 
   const results = await Promise.allSettled(
     input.queries.map(async (query) => {
-      const resp = await fetchWithTimeout("https://api.tavily.com/search", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json"
-        },
-        body: JSON.stringify({
-          api_key: TAVILY_API_KEY,
-          query,
-          search_depth: "advanced",
-          topic: "news",
-          days: input.days,
-          max_results: input.maxResults || 5,
-          include_raw_content: true
-        })
-      }, 15000)
+      const startedAt = Date.now()
+      let statusCode: number | null = null
 
-      if (!resp.ok) {
-        const body = await resp.text().catch(() => "")
-        console.warn(`[tavily] search failed for "${query}": ${resp.status} ${body.slice(0, 300)}`)
-        return []
-      }
+      try {
+        const resp = await fetchWithTimeout("https://api.tavily.com/search", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json"
+          },
+          body: JSON.stringify({
+            api_key: TAVILY_API_KEY,
+            query,
+            search_depth: "advanced",
+            topic: "news",
+            days: input.days,
+            max_results: input.maxResults || 5,
+            include_raw_content: true
+          })
+        }, 15000)
 
-      const data = await resp.json()
-      const tavilyResults = Array.isArray(data?.results) ? data.results : []
-      console.log(`[tavily] query="${query}" returned ${tavilyResults.length} results`)
-      return tavilyResults.map((result: any) => {
-        const rawText = String(result.raw_content || "").trim()
-        const snippet = String(result.content || "").trim()
-        const bestContent = rawText.length > snippet.length ? rawText : snippet
-        return {
-          title: String(result.title || "").trim(),
-          link: String(result.url || "").trim(),
-          pubDate: String(result.published_date || ""),
-          description: snippet.slice(0, 500),
-          source: String(new URL(result.url || "https://unknown").hostname).replace(/^www\./, ""),
-          resolvedUrl: String(result.url || "").trim(),
-          contentPreview: bestContent.slice(0, 8000) || null
+        statusCode = resp.status
+
+        if (!resp.ok) {
+          const body = await resp.text().catch(() => "")
+          await recordExternalApiCall({
+            userId: input.userId || null,
+            runId: input.runId || null,
+            slotId: input.slotId || null,
+            callSiteName: "digest.news.tavily_search",
+            filePath: "lib/digest/generator.ts",
+            functionName: "fetchTavilyNews",
+            provider: "tavily",
+            endpoint: "search",
+            latencyMs: Date.now() - startedAt,
+            success: false,
+            statusCode,
+            errorMessage: body.slice(0, 500),
+            metadata: {
+              query,
+              days: input.days,
+              max_results: input.maxResults || 5
+            }
+          })
+          console.warn(`[tavily] search failed for "${query}": ${resp.status} ${body.slice(0, 300)}`)
+          return []
         }
-      }).filter((article: NewsArticle) => article.title && article.link)
+
+        const data = await resp.json()
+        const tavilyResults = Array.isArray(data?.results) ? data.results : []
+        await recordExternalApiCall({
+          userId: input.userId || null,
+          runId: input.runId || null,
+          slotId: input.slotId || null,
+          callSiteName: "digest.news.tavily_search",
+          filePath: "lib/digest/generator.ts",
+          functionName: "fetchTavilyNews",
+          provider: "tavily",
+          endpoint: "search",
+          latencyMs: Date.now() - startedAt,
+          success: true,
+          statusCode,
+          metadata: {
+            query,
+            days: input.days,
+            max_results: input.maxResults || 5,
+            result_count: tavilyResults.length
+          }
+        })
+        console.log(`[tavily] query="${query}" returned ${tavilyResults.length} results`)
+        return tavilyResults.map((result: any) => {
+          const rawText = String(result.raw_content || "").trim()
+          const snippet = String(result.content || "").trim()
+          const bestContent = rawText.length > snippet.length ? rawText : snippet
+          return {
+            title: String(result.title || "").trim(),
+            link: String(result.url || "").trim(),
+            pubDate: String(result.published_date || ""),
+            description: snippet.slice(0, 500),
+            source: String(new URL(result.url || "https://unknown").hostname).replace(/^www\./, ""),
+            resolvedUrl: String(result.url || "").trim(),
+            contentPreview: bestContent.slice(0, 8000) || null
+          }
+        }).filter((article: NewsArticle) => article.title && article.link)
+      } catch (e: any) {
+        await recordExternalApiCall({
+          userId: input.userId || null,
+          runId: input.runId || null,
+          slotId: input.slotId || null,
+          callSiteName: "digest.news.tavily_search",
+          filePath: "lib/digest/generator.ts",
+          functionName: "fetchTavilyNews",
+          provider: "tavily",
+          endpoint: "search",
+          latencyMs: Date.now() - startedAt,
+          success: false,
+          statusCode,
+          errorMessage: String(e?.message || e),
+          metadata: {
+            query,
+            days: input.days,
+            max_results: input.maxResults || 5
+          }
+        })
+        throw e
+      }
     })
   )
 
@@ -524,6 +594,9 @@ function fallbackRelevantNewsArticles(input: {
 }
 
 async function filterRelevantNewsArticles(input: {
+  userId?: string | null
+  runId?: string | null
+  slotId?: string | null
   topic: NewsTopicRecord
   searchInstruction: string
   articles: NewsArticle[]
@@ -582,7 +655,21 @@ Keep reasons short.`
           }))
         })
       }
-    ]
+    ],
+    telemetry: {
+      userId: input.userId || null,
+      runId: input.runId || null,
+      slotId: input.slotId || null,
+      callSiteName: "digest.news.relevance_filter",
+      filePath: "lib/digest/generator.ts",
+      functionName: "filterRelevantNewsArticles",
+      validationStatus: "regex",
+      outputShapeName: "NewsRelevanceEvaluations",
+      metadata: {
+        candidate_count: input.articles.length,
+        topic_id: input.topic.id
+      }
+    }
   })
 
   const data = await resp.json()
@@ -704,6 +791,9 @@ async function getRecentGeneratedNewsMetadata(input: {
 }
 
 async function synthesizeLessonContent(input: {
+  userId?: string | null
+  runId?: string | null
+  slotId?: string | null
   topic: LessonTopicRecord
   curriculumTitle: string
   day: CurriculumDay
@@ -766,7 +856,22 @@ Tone:
     system: prompt,
     messages: [{ role: "user", content: JSON.stringify(userPayload) }],
     temperature: 0.4,
-    maxTokens: 8192
+    maxTokens: 8192,
+    telemetry: {
+      userId: input.userId || null,
+      runId: input.runId || null,
+      slotId: input.slotId || input.topic.id,
+      callSiteName: "digest.lessons.synthesize_content",
+      filePath: "lib/digest/generator.ts",
+      functionName: "synthesizeLessonContent",
+      validationStatus: "regex",
+      outputShapeName: "DailyLessonContent",
+      metadata: {
+        topic_id: input.topic.id,
+        current_day: input.currentDay,
+        day_count: input.dayCount
+      }
+    }
   })
   const parsed = extractJsonObject(raw)
 
@@ -795,6 +900,9 @@ Tone:
 }
 
 async function synthesizeNewsBrief(input: {
+  userId?: string | null
+  runId?: string | null
+  slotId?: string | null
   topic: NewsTopicRecord
   searchInstruction: string
   articles: NewsArticle[]
@@ -860,7 +968,22 @@ Requirements:
         }))
         })
       }
-    ]
+    ],
+    telemetry: {
+      userId: input.userId || null,
+      runId: input.runId || null,
+      slotId: input.slotId || input.topic.id,
+      callSiteName: "digest.news.synthesize_brief_legacy",
+      filePath: "lib/digest/generator.ts",
+      functionName: "synthesizeNewsBrief",
+      validationStatus: "regex",
+      outputShapeName: "NewsBrief",
+      metadata: {
+        candidate_count: input.articles.length,
+        topic_id: input.topic.id,
+        legacy_path: true
+      }
+    }
   })
 
   const data = await resp.json()
@@ -878,6 +1001,9 @@ Requirements:
 }
 
 async function unifiedFilterAndSynthesize(input: {
+  userId?: string | null
+  runId?: string | null
+  slotId?: string | null
   topic: NewsTopicRecord
   searchInstruction: string
   candidates: NewsArticle[]
@@ -969,7 +1095,22 @@ Synthesis rules:
           }))
         })
       }
-    ]
+    ],
+    telemetry: {
+      userId: input.userId || null,
+      runId: input.runId || null,
+      slotId: input.slotId || input.topic.id,
+      callSiteName: "digest.news.unified_filter_and_synthesize",
+      filePath: "lib/digest/generator.ts",
+      functionName: "unifiedFilterAndSynthesize",
+      validationStatus: "regex",
+      outputShapeName: "UnifiedNewsBrief",
+      metadata: {
+        candidate_count: input.candidates.length,
+        topic_id: input.topic.id,
+        tier_key: input.tierKey
+      }
+    }
   })
 
   const data = await resp.json()
@@ -1046,11 +1187,20 @@ async function fetchGoogleNewsForTier(queries: string[], tier: NewsFreshnessTier
   return articles
 }
 
-async function fetchNewsArticlesForTier(topic: NewsTopicRecord, tier: NewsFreshnessTier) {
+async function fetchNewsArticlesForTier(
+  topic: NewsTopicRecord,
+  tier: NewsFreshnessTier,
+  context: { userId?: string | null; runId?: string | null; slotId?: string | null } = {}
+) {
   const queries = buildNewsSearchQueries(topic)
   const days = tierKeyToDays(tier.key)
 
-  const tavilyArticles = await fetchTavilyNews({ queries, days, maxResults: 10 })
+  const tavilyArticles = await fetchTavilyNews({
+    ...context,
+    queries,
+    days,
+    maxResults: 10
+  })
   const tavilySubstantiveCount = tavilyArticles.filter(isSubstantiveArticle).length
 
   let googleArticles: NewsArticle[] = []
@@ -1259,6 +1409,9 @@ export async function generateDailyLessons(input: {
 
       const dayPlan = curriculumDays.find((day) => Number(day.day) === nextDay) || curriculumDays[nextDay - 1]
       const lesson = await synthesizeLessonContent({
+        userId: input.userId,
+        runId,
+        slotId: topic.id,
         topic,
         curriculumTitle: String(curriculumPlan.curriculum_title || topic.topic_text),
         day: {
@@ -1399,7 +1552,11 @@ export async function generateDailyNewsTopics(input: {
       const retrievalFunnel: RetrievalFunnelLog[] = []
 
       for (const tier of NEWS_FRESHNESS_TIERS) {
-        const retrieval = await fetchNewsArticlesForTier(topic, tier)
+        const retrieval = await fetchNewsArticlesForTier(topic, tier, {
+          userId: input.userId,
+          runId,
+          slotId: topic.id
+        })
         const unseenArticles = retrieval.articles.filter((article) => !recentlyUsedUrls.has(article.link))
         const substantiveArticles = unseenArticles.filter(isSubstantiveArticle)
         const preFilteredArticles = substantiveArticles.filter((article) => passesTopicPreFilter(article, topic))
@@ -1456,6 +1613,9 @@ export async function generateDailyNewsTopics(input: {
       if (selectedTier && allCandidates.length > 0) {
         const trackedEntities = getTrackedEntities(topic)
         const brief = await unifiedFilterAndSynthesize({
+          userId: input.userId,
+          runId,
+          slotId: topic.id,
           topic,
           searchInstruction,
           candidates: allCandidates.slice(0, 15),
@@ -1518,4 +1678,3 @@ export async function generateDailyNewsTopics(input: {
     throw e
   }
 }
-

@@ -127,7 +127,15 @@ export async function POST(req: Request) {
       messages: [
         { role: "system", content: NEWS_CLARIFIER_PROMPT },
         { role: "user", content: JSON.stringify(payload) }
-      ]
+      ],
+      telemetry: {
+        userId: user.id,
+        callSiteName: "onboard.clarify_news_topic",
+        filePath: "app/api/onboard/clarify-news-topic/route.ts",
+        functionName: "POST",
+        validationStatus: "regex",
+        outputShapeName: "NewsTopicClarifier"
+      }
     })
 
     const data = await resp.json()
@@ -156,4 +164,3 @@ export async function POST(req: Request) {
     }, { status: 500 })
   }
 }
-

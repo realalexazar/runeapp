@@ -60,6 +60,7 @@ export async function POST(req: Request) {
         ? await Promise.all(
             lessonSlots.map((slot) =>
               generateCurriculumPlan({
+                userId: user.id,
                 topic: slot.focus,
                 startingLevel: slot.starting_level || "beginner",
                 curriculumGoal: slot.curriculum_goal || null,

@@ -214,7 +214,7 @@ function extractJsonObject(text: string): any | null {
   return null
 }
 
-async function generateTechnicalConfig(intentData: Record<string, any>, scanSummary: any): Promise<Record<string, any> | null> {
+async function generateTechnicalConfig(userId: string, intentData: Record<string, any>, scanSummary: any): Promise<Record<string, any> | null> {
   const OPENAI_API_KEY = process.env.OPENAI_API_KEY
   if (!OPENAI_API_KEY) return null
 
@@ -232,7 +232,15 @@ async function generateTechnicalConfig(intentData: Record<string, any>, scanSumm
             inbox_scan: scanSummary || null,
           })
         }
-      ]
+      ],
+      telemetry: {
+        userId,
+        callSiteName: "onboard.chat.technical_config",
+        filePath: "app/api/onboard/chat/route.ts",
+        functionName: "generateTechnicalConfig",
+        validationStatus: "regex",
+        outputShapeName: "OnboardTechnicalConfig"
+      }
     })
 
     const data = await resp.json()
@@ -275,7 +283,15 @@ export async function POST(req: Request) {
         messages: [
           { role: "user", content: `[SYSTEM: Generate your opening message to a new user. No prior context. ${vibe}]` }
         ],
-        temperature: 1.0
+        temperature: 1.0,
+        telemetry: {
+          userId,
+          callSiteName: "onboard.chat.opening_message",
+          filePath: "app/api/onboard/chat/route.ts",
+          functionName: "POST",
+          validationStatus: "none",
+          outputShapeName: "OnboardOpeningMessage"
+        }
       })
 
       return NextResponse.json({
@@ -308,7 +324,22 @@ export async function POST(req: Request) {
     const rawResponse = await callClaude({
       system: systemPrompt,
       messages,
-      temperature: 0.7
+      temperature: 0.7,
+      telemetry: {
+        userId,
+        callSiteName: useRecommendationPrompt
+          ? "onboard.chat.recommendation_copy"
+          : "onboard.chat.conversation_turn",
+        filePath: "app/api/onboard/chat/route.ts",
+        functionName: "POST",
+        validationStatus: "regex",
+        outputShapeName: useRecommendationPrompt
+          ? "OnboardRecommendationSignal"
+          : "OnboardIntentSignal",
+        metadata: {
+          onboard_chat_phase: serverPhase
+        }
+      }
     })
 
     const { type: signalType, data: signalData } = extractSignal(rawResponse)
@@ -370,7 +401,7 @@ export async function POST(req: Request) {
         }
       }
 
-      const technicalConfig = await generateTechnicalConfig(intentData, scanSummary)
+      const technicalConfig = await generateTechnicalConfig(userId, intentData, scanSummary)
 
       const mergedData: Record<string, any> = {
         ...(signalData || {}),

@@ -59,6 +59,8 @@ function fallbackCurriculum(topic: string, goal: string | null) {
 }
 
 export async function generateCurriculumPlan(input: {
+  userId?: string | null
+  slotId?: string | null
   topic: string
   startingLevel: string
   curriculumGoal: string | null
@@ -83,7 +85,16 @@ export async function generateCurriculumPlan(input: {
       messages: [
         { role: "system", content: CURRICULUM_PROMPT },
         { role: "user", content: JSON.stringify({ lesson_topic: input.topic, lesson_scope: scope, curriculum_days: 10 }) }
-      ]
+      ],
+      telemetry: {
+        userId: input.userId || null,
+        slotId: input.slotId || null,
+        callSiteName: "onboard.approve.curriculum_plan",
+        filePath: "lib/onboard/generate-curriculum.ts",
+        functionName: "generateCurriculumPlan",
+        validationStatus: "regex",
+        outputShapeName: "LessonCurriculum"
+      }
     })
 
     const data = await resp.json()

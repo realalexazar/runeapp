@@ -264,6 +264,18 @@ Return ONLY valid JSON:
         { role: "system", content: "You score email senders for relevance. Return strict JSON only." },
         { role: "user", content: classificationPrompt },
       ],
+      telemetry: {
+        userId: user.id,
+        callSiteName: "onboard.scan_inbox.sender_relevance",
+        filePath: "app/api/onboard/scan-inbox/route.ts",
+        functionName: "POST",
+        validationStatus: "regex",
+        outputShapeName: "InboxSenderRelevance",
+        metadata: {
+          candidate_count: senderEntries.length,
+          scan_window_days: SCAN_WINDOW_DAYS
+        }
+      }
     })
 
     const llmData = await llmResp.json()

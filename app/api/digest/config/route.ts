@@ -99,6 +99,7 @@ function extractJsonObject(text: string): any | null {
 }
 
 async function mapTopicsWithLLM(input: {
+  userId?: string | null
   newsTopic: string | null
   lessonTopic: string | null
   newsTimeframe: string
@@ -170,7 +171,15 @@ Rules:
       messages: [
         { role: "system", content: systemPrompt },
         { role: "user", content: JSON.stringify(userPayload) }
-      ]
+      ],
+      telemetry: {
+        userId: input.userId || null,
+        callSiteName: "digest.config.topic_mapping",
+        filePath: "app/api/digest/config/route.ts",
+        functionName: "mapTopicsWithLLM",
+        validationStatus: "regex",
+        outputShapeName: "TopicMappingResult"
+      }
     })
 
     const data = await res.json()
@@ -555,6 +564,7 @@ export async function POST(req: Request) {
 
     // Persist topic inputs (single active topic per module in alpha).
     const topicMappings = await mapTopicsWithLLM({
+      userId: user.id,
       newsTopic: moduleFlags.enable_daily_news_topics ? newsTopic : null,
       lessonTopic: moduleFlags.enable_daily_lessons ? lessonTopic : null,
       newsTimeframe: String(moduleDefaults.news_topic_timeframe || "24h"),

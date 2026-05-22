@@ -4,6 +4,7 @@
  */
 
 import pLimit from "p-limit"
+import { estimateTextTokens, recordLlmCall } from "@/lib/ai/llm-telemetry"
 
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY
 const BATCH_SIZE = 20 // Candidates per API call
@@ -24,17 +25,21 @@ export interface ClassificationResult {
   low_confidence: boolean
 }
 
+type BatchTelemetryContext = {
+  userId?: string | null
+}
+
 /**
  * Classify multiple senders using batched LLM calls
  * - If <= 20 candidates: single API call
  * - If > 20 candidates: split into batches of 20 and process concurrently
  */
-export async function classifyBatch(candidates: Candidate[]): Promise<ClassificationResult[]> {
+export async function classifyBatch(candidates: Candidate[], telemetry?: BatchTelemetryContext): Promise<ClassificationResult[]> {
   if (candidates.length === 0) return []
 
   // Single batch if <= BATCH_SIZE
   if (candidates.length <= BATCH_SIZE) {
-    return await classifyBatchSingle(candidates, 0)
+    return await classifyBatchSingle(candidates, 0, telemetry)
   }
 
   // Split into batches and process concurrently
@@ -47,7 +52,7 @@ export async function classifyBatch(candidates: Candidate[]): Promise<Classifica
   const batchTasks = chunks.map((chunk, chunkIndex) =>
     limit(async () => {
       const offset = chunkIndex * BATCH_SIZE
-      return await classifyBatchSingle(chunk, offset)
+      return await classifyBatchSingle(chunk, offset, telemetry)
     })
   )
 
@@ -58,7 +63,11 @@ export async function classifyBatch(candidates: Candidate[]): Promise<Classifica
 /**
  * Classify a single batch of candidates (one API call)
  */
-async function classifyBatchSingle(candidates: Candidate[], offset: number = 0): Promise<ClassificationResult[]> {
+async function classifyBatchSingle(
+  candidates: Candidate[],
+  offset: number = 0,
+  telemetry?: BatchTelemetryContext
+): Promise<ClassificationResult[]> {
   // Build batch prompt
   const candidatesText = candidates.map((c, i) => {
     const subjectsText = c.subjects.map((s, j) => `  ${j + 1}. ${s}`).join("\n")
@@ -137,7 +146,11 @@ Use the candidate number from above (${offset + 1}, ${offset + 2}, etc.).`
         low_confidence: c.count_14d < 3
       }))
     }
-    responseText = await callOpenAI(prompt)
+    responseText = await callOpenAI(prompt, {
+      ...telemetry,
+      offset,
+      candidateCount: candidates.length
+    })
   } catch (e) {
     console.error("OpenAI batch classification error:", e)
     // Fallback: mark all as uncertain on error
@@ -154,27 +167,79 @@ Use the candidate number from above (${offset + 1}, ${offset + 2}, etc.).`
   return results
 }
 
-async function callOpenAI(prompt: string): Promise<string> {
-  const response = await fetch("https://api.openai.com/v1/chat/completions", {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      "Authorization": `Bearer ${OPENAI_API_KEY}`
-    },
-    body: JSON.stringify({
-      model: "gpt-4o-mini",
-      messages: [{ role: "user", content: prompt }],
-      temperature: 0.1,
-      max_tokens: 500
+async function callOpenAI(
+  prompt: string,
+  telemetry?: BatchTelemetryContext & { offset: number; candidateCount: number }
+): Promise<string> {
+  const startedAt = Date.now()
+  const model = "gpt-4o-mini"
+  const inputTokens = estimateTextTokens(prompt)
+
+  try {
+    const response = await fetch("https://api.openai.com/v1/chat/completions", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "Authorization": `Bearer ${OPENAI_API_KEY}`
+      },
+      body: JSON.stringify({
+        model,
+        messages: [{ role: "user", content: prompt }],
+        temperature: 0.1,
+        max_tokens: 500
+      })
     })
-  })
 
-  if (!response.ok) {
-    throw new Error(`OpenAI API error: ${response.status}`)
+    if (!response.ok) {
+      throw new Error(`OpenAI API error: ${response.status}`)
+    }
+
+    const data = await response.json()
+    const responseText = data.choices[0]?.message?.content?.trim() || ""
+
+    await recordLlmCall({
+      userId: telemetry?.userId || null,
+      callSiteName: "onboard.classify_senders.batch",
+      filePath: "lib/onboard/llm-batch.ts",
+      functionName: "callOpenAI",
+      provider: "openai",
+      model,
+      providerRequestId: data?.id || response.headers.get("x-request-id"),
+      inputTokens: Number(data?.usage?.prompt_tokens) || inputTokens,
+      outputTokens: Number(data?.usage?.completion_tokens) || estimateTextTokens(responseText),
+      latencyMs: Date.now() - startedAt,
+      success: true,
+      validationStatus: "regex",
+      outputShapeName: "SenderClassificationArray",
+      metadata: {
+        offset: telemetry?.offset,
+        candidate_count: telemetry?.candidateCount
+      }
+    })
+
+    return responseText
+  } catch (e: any) {
+    await recordLlmCall({
+      userId: telemetry?.userId || null,
+      callSiteName: "onboard.classify_senders.batch",
+      filePath: "lib/onboard/llm-batch.ts",
+      functionName: "callOpenAI",
+      provider: "openai",
+      model,
+      inputTokens,
+      outputTokens: null,
+      latencyMs: Date.now() - startedAt,
+      success: false,
+      errorMessage: String(e?.message || e),
+      validationStatus: "regex",
+      outputShapeName: "SenderClassificationArray",
+      metadata: {
+        offset: telemetry?.offset,
+        candidate_count: telemetry?.candidateCount
+      }
+    })
+    throw e
   }
-
-  const data = await response.json()
-  return data.choices[0]?.message?.content?.trim() || ""
 }
 
 function parseLLMResponse(responseText: string, candidates: Candidate[], offset: number = 0): ClassificationResult[] {
@@ -238,4 +303,3 @@ function parseLLMResponse(responseText: string, candidates: Candidate[], offset:
   
   return results
 }
-

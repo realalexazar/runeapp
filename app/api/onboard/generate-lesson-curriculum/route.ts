@@ -189,7 +189,15 @@ export async function POST(req: Request) {
       messages: [
         { role: "system", content: LESSON_CURRICULUM_PROMPT },
         { role: "user", content: JSON.stringify(payload) }
-      ]
+      ],
+      telemetry: {
+        userId: user.id,
+        callSiteName: "onboard.generate_lesson_curriculum",
+        filePath: "app/api/onboard/generate-lesson-curriculum/route.ts",
+        functionName: "POST",
+        validationStatus: "regex",
+        outputShapeName: "LessonCurriculum"
+      }
     })
 
     const data = await resp.json()
@@ -216,4 +224,3 @@ export async function POST(req: Request) {
     }, { status: 500 })
   }
 }
-

@@ -1,3 +1,9 @@
+import {
+  estimateMessageTokens,
+  recordLlmCall,
+  type LlmTelemetryContext
+} from "@/lib/ai/llm-telemetry"
+
 const OPENAI_API_URL = process.env.OPENROUTER_API_KEY
   ? "https://openrouter.ai/api/v1/chat/completions"
   : "https://api.openai.com/v1/chat/completions"
@@ -42,8 +48,13 @@ export async function callOpenAIChatCompletion(input: {
   model: string
   temperature: number
   messages: Array<{ role: string; content: string }>
+  maxTokens?: number
+  telemetry?: LlmTelemetryContext
 }) {
   let lastError: any = null
+  const startedAt = Date.now()
+  const provider = process.env.OPENROUTER_API_KEY ? "openrouter" : "openai"
+  const estimatedInputTokens = estimateMessageTokens(input.messages)
 
   for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
     try {
@@ -58,7 +69,8 @@ export async function callOpenAIChatCompletion(input: {
         body: JSON.stringify({
           model: input.model,
           temperature: input.temperature,
-          messages: input.messages
+          messages: input.messages,
+          ...(input.maxTokens ? { max_tokens: input.maxTokens } : {})
         }),
         // Next.js runtime accepts extra undici options at runtime.
         dispatcher
@@ -68,10 +80,48 @@ export async function callOpenAIChatCompletion(input: {
         throw new Error(`OpenAI request failed (${resp.status})`)
       }
 
+      if (input.telemetry) {
+        const usagePayload = await resp.clone().json().catch(() => null)
+        const usage = usagePayload?.usage || {}
+        const inputTokens = Number(usage.prompt_tokens || usage.input_tokens) || estimatedInputTokens
+        const outputTokens = Number(usage.completion_tokens || usage.output_tokens) || null
+
+        await recordLlmCall({
+          ...input.telemetry,
+          provider,
+          model: input.model,
+          providerRequestId: usagePayload?.id || resp.headers.get("x-request-id"),
+          inputTokens,
+          outputTokens,
+          latencyMs: Date.now() - startedAt,
+          success: true,
+          metadata: {
+            ...(input.telemetry.metadata || {}),
+            attempt
+          }
+        })
+      }
+
       return resp
     } catch (e: any) {
       lastError = e
       if (!isTransientNetworkError(e) || attempt === MAX_ATTEMPTS) {
+        if (input.telemetry) {
+          await recordLlmCall({
+            ...input.telemetry,
+            provider,
+            model: input.model,
+            inputTokens: estimatedInputTokens,
+            outputTokens: null,
+            latencyMs: Date.now() - startedAt,
+            success: false,
+            errorMessage: String(e?.message || e),
+            metadata: {
+              ...(input.telemetry.metadata || {}),
+              attempt
+            }
+          })
+        }
         throw e
       }
       await sleep(BASE_BACKOFF_MS * attempt)
@@ -80,4 +130,3 @@ export async function callOpenAIChatCompletion(input: {
 
   throw lastError || new Error("OpenAI request failed")
 }
-

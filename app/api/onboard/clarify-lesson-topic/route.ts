@@ -134,7 +134,15 @@ export async function POST(req: Request) {
       messages: [
         { role: "system", content: LESSON_CLARIFIER_PROMPT },
         { role: "user", content: JSON.stringify(payload) }
-      ]
+      ],
+      telemetry: {
+        userId: user.id,
+        callSiteName: "onboard.clarify_lesson_topic",
+        filePath: "app/api/onboard/clarify-lesson-topic/route.ts",
+        functionName: "POST",
+        validationStatus: "regex",
+        outputShapeName: "LessonTopicClarifier"
+      }
     })
 
     const data = await resp.json()
@@ -163,4 +171,3 @@ export async function POST(req: Request) {
     }, { status: 500 })
   }
 }
-
