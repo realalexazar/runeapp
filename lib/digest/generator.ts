@@ -140,13 +140,6 @@ function parseGoogleNewsRss(xml: string) {
   }).filter((item) => item.title && item.link)
 }
 
-function timeframeToGoogleNewsOperator(timeframe: string | null | undefined) {
-  const normalized = String(timeframe || "24h").toLowerCase()
-  if (normalized.includes("7d") || normalized.includes("7 days")) return "when:7d"
-  if (normalized.includes("30d") || normalized.includes("30 days")) return "when:30d"
-  return "when:1d"
-}
-
 const NEWS_FRESHNESS_TIERS: NewsFreshnessTier[] = [
   { key: "24h", operator: "when:1d", framingLabel: "Today on this topic" },
   { key: "72h", operator: "when:3d", framingLabel: "Recent developments" },
@@ -899,7 +892,7 @@ Tone:
   }
 }
 
-async function synthesizeNewsBrief(input: {
+async function _synthesizeNewsBrief(input: {
   userId?: string | null
   runId?: string | null
   slotId?: string | null
@@ -975,7 +968,7 @@ Requirements:
       slotId: input.slotId || input.topic.id,
       callSiteName: "digest.news.synthesize_brief_legacy",
       filePath: "lib/digest/generator.ts",
-      functionName: "synthesizeNewsBrief",
+      functionName: "_synthesizeNewsBrief",
       validationStatus: "regex",
       outputShapeName: "NewsBrief",
       metadata: {
@@ -1133,33 +1126,6 @@ Synthesis rules:
     ),
     references: Array.isArray(parsed.references) ? parsed.references : [],
     articlesUsed: Number(parsed.articles_used || parsed.relevant_indexes?.length || 0),
-  }
-}
-
-async function fetchNewsArticles(topic: NewsTopicRecord) {
-  const baseQuery = buildNewsSearchBase(topic)
-  const timeframeOperator = timeframeToGoogleNewsOperator(topic.timeframe)
-  const query = encodeURIComponent(`${baseQuery} ${timeframeOperator}`)
-  const url = `https://news.google.com/rss/search?q=${query}&hl=en-US&gl=US&ceid=US:en`
-  const resp = await fetch(url, {
-    headers: {
-      "User-Agent": "RuneDigest/1.0"
-    }
-  })
-
-  if (!resp.ok) {
-    throw new Error(`News retrieval failed (${resp.status})`)
-  }
-
-  const xml = await resp.text()
-  const parsed = parseGoogleNewsRss(xml)
-  const deduped = parsed.filter((item, index, arr) =>
-    arr.findIndex((other) => other.link === item.link || other.title === item.title) === index
-  )
-
-  return {
-    query: `${baseQuery} ${timeframeOperator}`.trim(),
-    articles: deduped.slice(0, 8)
   }
 }
 
