@@ -1,6 +1,6 @@
 # Phase 0a LLM Call Inventory
 
-Last updated: 2026-05-22
+Last updated: 2026-05-24
 
 This is the static inventory for Phase 0a. It maps every production-relevant LLM call site found in `app/` and `lib/`, the output contract currently expected, and whether runtime telemetry is wired.
 
@@ -10,7 +10,7 @@ This is the static inventory for Phase 0a. It maps every production-relevant LLM
 - Migration: `supabase/migrations/20260522090000_phase0a_telemetry.sql`
 - Baseline query: `docs/phase0a_llm_cost_baseline.sql`
 - Shared telemetry helper: `lib/ai/llm-telemetry.ts`
-- Current validation posture: no call site has schema validation yet. The live system is mostly `regex` / ad hoc JSON extraction.
+- Current validation posture: one low-risk call site has Phase 0b schema validation. The rest of the live system is mostly `regex` / ad hoc JSON extraction.
 
 ## Inventory
 
@@ -25,7 +25,7 @@ This is the static inventory for Phase 0a. It maps every production-relevant LLM
 | `onboard.clarify_news_topic` | `app/api/onboard/clarify-news-topic/route.ts` / `POST` | OpenAI/OpenRouter | `gpt-4o-mini` | Legacy/dashboard news topic clarifier | `regex` | `NewsTopicClarifier` | yes |
 | `onboard.clarify_lesson_topic` | `app/api/onboard/clarify-lesson-topic/route.ts` / `POST` | OpenAI/OpenRouter | `gpt-4o-mini` | Legacy/dashboard lesson topic clarifier | `regex` | `LessonTopicClarifier` | yes |
 | `onboard.generate_lesson_curriculum` | `app/api/onboard/generate-lesson-curriculum/route.ts` / `POST` | OpenAI/OpenRouter | `gpt-4o-mini` | Legacy/dashboard standalone curriculum generation | `regex` | `LessonCurriculum` | yes |
-| `onboard.approve.curriculum_plan` | `lib/onboard/generate-curriculum.ts` / `generateCurriculumPlan` | OpenAI/OpenRouter | `gpt-4o` | Approve/backfill curriculum plan generation | `regex` | `LessonCurriculum` | yes |
+| `onboard.approve.curriculum_plan` | `lib/onboard/generate-curriculum.ts` / `generateCurriculumPlan` | OpenAI/OpenRouter | `gpt-4o` | Approve/backfill curriculum plan generation | `schema` | `LessonCurriculum` | yes |
 | `digest.config.topic_mapping` | `app/api/digest/config/route.ts` / `mapTopicsWithLLM` | OpenAI/OpenRouter | `gpt-4o-mini` | Legacy/dashboard topic mapping into digest config | `regex` | `TopicMappingResult` | yes |
 | `digest.newsletters.summarize_chunk` | `lib/digest/summarize-newsletters.ts` / `summarizeChunk` | OpenAI/OpenRouter | `gpt-4o` | Cron newsletter batch summaries | `regex` | `NewsletterSummaryMap` | yes |
 | `digest.dev_generate_summaries.batch` | `app/api/digest/generate-summaries/route.ts` / `summarizeBatchSingle` | OpenAI/OpenRouter | `gpt-4o-mini` or `gpt-4o` | Dev/dashboard batch summaries | `regex` | `NewsletterSummaryArray` | yes |
@@ -54,6 +54,6 @@ Sources checked on 2026-05-22:
 ## Follow-Up For Phase 0b
 
 - Replace `regex` extraction with named Zod schemas.
-- Add raw-output capture only for validation failures, after retention rules are decided.
+- Raw-output capture for schema validation failures is now available in `public.llm_validation_failures` with 30-day retention metadata.
 - Route `lib/onboard/llm-batch.ts` through the future LLM gateway; it is still direct OpenAI fetch for Phase 0a measurement.
 - Use `docs/phase0a_external_api_inventory.md` for non-LLM API call tracking; Tavily runtime telemetry is wired, Gmail remains static inventory.

@@ -1,7 +1,7 @@
 # Rune Rebuild Plan
 
 Last updated: 2026-05-24
-Version: 1.6
+Version: 1.7
 File: `docs/REBUILD_PLAN.md`
 
 This document is the source of truth for the Rune rebuild. It pins down the sequence, scope, exit criteria, and architectural direction so the team does not keep re-litigating the plan in chat.
@@ -545,6 +545,7 @@ Acceptance criteria:
 | Plain Postgres backing in Phase 1 | Locked | Fastest way to validate domain model |
 | No Phase 0c feature expansion | Locked | Stabilization must stay scoped |
 | Gmail/OAuth telemetry must be privacy-minimal | Locked | Measure quota, latency, and failure rates without storing message ids, subjects, sender addresses, OAuth tokens, private bodies, or raw Gmail queries |
+| Phase 0b migrations start with low-risk call sites | Locked | Build confidence in the gateway before touching expensive or user-visible synthesis paths |
 
 ## Open Questions
 
@@ -560,6 +561,7 @@ Acceptance criteria:
 
 | Version | Date | Changes |
 | --- | --- | --- |
+| 1.7 | 2026-05-24 | Started Phase 0b gateway with schema validation, validation-failure capture, and first low-risk call-site migration. |
 | 1.6 | 2026-05-24 | Added Google News RSS and web article hydration telemetry to Phase 0a coverage. |
 | 1.5 | 2026-05-24 | Added Gmail/OAuth runtime telemetry coverage, privacy-minimal telemetry decision, and updated immediate Phase 0a tasks. |
 | 1.4 | 2026-05-24 | Added Phase 0a run-health query and snapshot artifact for controlled production measurement. |

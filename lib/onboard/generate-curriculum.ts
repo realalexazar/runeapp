@@ -1,4 +1,5 @@
-import { callOpenAIChatCompletion } from "@/lib/openai/chat"
+import { generateOpenAIObject } from "@/lib/ai/gateway"
+import { lessonCurriculumSchema } from "@/lib/ai/schemas/lesson-curriculum"
 
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY
 
@@ -29,17 +30,6 @@ RULES:
 - A good objective starts with a verb and describes a capability.
 - Good key_points contain concrete claims, relationships, or techniques — not topic headers.
 - Do not broaden beyond the sub-domain in the scope.`
-
-function extractJsonObject(text: string): any | null {
-  const trimmed = text.trim()
-  try { return JSON.parse(trimmed) } catch {}
-  const start = trimmed.indexOf("{")
-  const end = trimmed.lastIndexOf("}")
-  if (start >= 0 && end > start) {
-    try { return JSON.parse(trimmed.slice(start, end + 1)) } catch {}
-  }
-  return null
-}
 
 function fallbackCurriculum(topic: string, goal: string | null) {
   const days = Array.from({ length: 10 }).map((_, i) => ({
@@ -78,7 +68,7 @@ export async function generateCurriculumPlan(input: {
   ].filter(Boolean).join(". ")
 
   try {
-    const resp = await callOpenAIChatCompletion({
+    return await generateOpenAIObject({
       apiKey: OPENAI_API_KEY,
       model: "gpt-4o",
       temperature: 0.2,
@@ -86,22 +76,16 @@ export async function generateCurriculumPlan(input: {
         { role: "system", content: CURRICULUM_PROMPT },
         { role: "user", content: JSON.stringify({ lesson_topic: input.topic, lesson_scope: scope, curriculum_days: 10 }) }
       ],
+      schema: lessonCurriculumSchema,
+      outputShapeName: "LessonCurriculum",
       telemetry: {
         userId: input.userId || null,
         slotId: input.slotId || null,
         callSiteName: "onboard.approve.curriculum_plan",
         filePath: "lib/onboard/generate-curriculum.ts",
-        functionName: "generateCurriculumPlan",
-        validationStatus: "regex",
-        outputShapeName: "LessonCurriculum"
+        functionName: "generateCurriculumPlan"
       }
     })
-
-    const data = await resp.json()
-    const parsed = extractJsonObject(data?.choices?.[0]?.message?.content || "")
-    if (parsed && Array.isArray(parsed.days) && parsed.days.length > 0) {
-      return parsed
-    }
   } catch (e) {
     console.error(`Curriculum generation failed for "${input.topic}":`, e)
   }
