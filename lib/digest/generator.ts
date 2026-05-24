@@ -9,7 +9,11 @@ import {
 } from "@/lib/digest/content-modules"
 import { callClaude } from "@/lib/anthropic/chat"
 import { callOpenAIChatCompletion } from "@/lib/openai/chat"
-import { recordExternalApiCall } from "@/lib/ai/external-api-telemetry"
+import {
+  getExternalApiErrorMessage,
+  getExternalApiStatusCode,
+  recordExternalApiCall,
+} from "@/lib/ai/external-api-telemetry"
 import { convert } from "html-to-text"
 import { Readability } from "@mozilla/readability"
 import { JSDOM } from "jsdom"
@@ -516,12 +520,18 @@ function extractArticlePreview(html: string, url: string): string | null {
   return null
 }
 
-async function hydrateArticlePreview(article: NewsArticle): Promise<NewsArticle> {
+async function hydrateArticlePreview(
+  article: NewsArticle,
+  context: { userId?: string | null; runId?: string | null; slotId?: string | null; tierKey?: string | null } = {}
+): Promise<NewsArticle> {
   const source = article.source || new URL(article.link || "https://unknown").hostname
 
   if (article.link.includes("news.google.com/rss/articles")) {
     return { ...article, contentPreview: null }
   }
+
+  const startedAt = Date.now()
+  let statusCode: number | null = null
 
   try {
     const resp = await fetchWithTimeout(article.link, {
@@ -530,8 +540,28 @@ async function hydrateArticlePreview(article: NewsArticle): Promise<NewsArticle>
       },
       redirect: "follow"
     }, 7000)
+    statusCode = resp.status
 
     if (!resp.ok) {
+      await recordExternalApiCall({
+        userId: context.userId || null,
+        runId: context.runId || null,
+        slotId: context.slotId || null,
+        callSiteName: "digest.news.article_hydration",
+        filePath: "lib/digest/generator.ts",
+        functionName: "hydrateArticlePreview",
+        provider: "web_fetch",
+        endpoint: "article.fetch",
+        requestUnits: 1,
+        latencyMs: Date.now() - startedAt,
+        success: false,
+        statusCode,
+        errorMessage: `HTTP ${resp.status}`,
+        metadata: {
+          source,
+          tier_key: context.tierKey || null
+        }
+      })
       console.log(`[hydration] FAIL ${resp.status} ${source}`)
       return { ...article, contentPreview: null }
     }
@@ -539,6 +569,26 @@ async function hydrateArticlePreview(article: NewsArticle): Promise<NewsArticle>
     const resolvedUrl = resp.url || article.link
     const html = await resp.text()
     const preview = extractArticlePreview(html, resolvedUrl)
+    await recordExternalApiCall({
+      userId: context.userId || null,
+      runId: context.runId || null,
+      slotId: context.slotId || null,
+      callSiteName: "digest.news.article_hydration",
+      filePath: "lib/digest/generator.ts",
+      functionName: "hydrateArticlePreview",
+      provider: "web_fetch",
+      endpoint: "article.fetch",
+      requestUnits: 1,
+      latencyMs: Date.now() - startedAt,
+      success: true,
+      statusCode,
+      metadata: {
+        source,
+        tier_key: context.tierKey || null,
+        preview_chars: preview?.length || 0,
+        usable_preview: Boolean(preview && preview.length >= 200)
+      }
+    })
     if (!preview || preview.length < 200) {
       console.log(`[hydration] THIN ${preview?.length || 0}ch ${source}`)
     }
@@ -548,6 +598,25 @@ async function hydrateArticlePreview(article: NewsArticle): Promise<NewsArticle>
       contentPreview: preview
     }
   } catch (e: any) {
+    await recordExternalApiCall({
+      userId: context.userId || null,
+      runId: context.runId || null,
+      slotId: context.slotId || null,
+      callSiteName: "digest.news.article_hydration",
+      filePath: "lib/digest/generator.ts",
+      functionName: "hydrateArticlePreview",
+      provider: "web_fetch",
+      endpoint: "article.fetch",
+      requestUnits: 1,
+      latencyMs: Date.now() - startedAt,
+      success: false,
+      statusCode: statusCode || getExternalApiStatusCode(e),
+      errorMessage: getExternalApiErrorMessage(e),
+      metadata: {
+        source,
+        tier_key: context.tierKey || null
+      }
+    })
     const reason = e?.code || e?.cause?.code || "unknown"
     console.log(`[hydration] ERR ${reason} ${source}`)
     return { ...article, contentPreview: null }
@@ -1129,20 +1198,92 @@ Synthesis rules:
   }
 }
 
-async function fetchGoogleNewsForTier(queries: string[], tier: NewsFreshnessTier) {
+async function fetchGoogleNewsForTier(
+  queries: string[],
+  tier: NewsFreshnessTier,
+  context: { userId?: string | null; runId?: string | null; slotId?: string | null } = {}
+) {
   const retrievals = await Promise.allSettled(
     queries.map(async (baseQuery) => {
+      const startedAt = Date.now()
+      let statusCode: number | null = null
       const query = encodeURIComponent(`${baseQuery} ${tier.operator}`)
       const url = `https://news.google.com/rss/search?q=${query}&hl=en-US&gl=US&ceid=US:en`
-      const resp = await fetchWithTimeout(url, {
-        headers: {
-          "User-Agent": "RuneDigest/1.0"
-        }
-      }, 7000)
+      try {
+        const resp = await fetchWithTimeout(url, {
+          headers: {
+            "User-Agent": "RuneDigest/1.0"
+          }
+        }, 7000)
+        statusCode = resp.status
 
-      if (!resp.ok) return []
-      const xml = await resp.text()
-      return parseGoogleNewsRss(xml)
+        if (!resp.ok) {
+          await recordExternalApiCall({
+            userId: context.userId || null,
+            runId: context.runId || null,
+            slotId: context.slotId || null,
+            callSiteName: "digest.news.google_news_rss",
+            filePath: "lib/digest/generator.ts",
+            functionName: "fetchGoogleNewsForTier",
+            provider: "google_news",
+            endpoint: "rss.search",
+            requestUnits: 1,
+            latencyMs: Date.now() - startedAt,
+            success: false,
+            statusCode,
+            errorMessage: `HTTP ${resp.status}`,
+            metadata: {
+              query: `${baseQuery} ${tier.operator}`.trim(),
+              tier_key: tier.key
+            }
+          })
+          return []
+        }
+
+        const xml = await resp.text()
+        const parsed = parseGoogleNewsRss(xml)
+        await recordExternalApiCall({
+          userId: context.userId || null,
+          runId: context.runId || null,
+          slotId: context.slotId || null,
+          callSiteName: "digest.news.google_news_rss",
+          filePath: "lib/digest/generator.ts",
+          functionName: "fetchGoogleNewsForTier",
+          provider: "google_news",
+          endpoint: "rss.search",
+          requestUnits: 1,
+          latencyMs: Date.now() - startedAt,
+          success: true,
+          statusCode,
+          metadata: {
+            query: `${baseQuery} ${tier.operator}`.trim(),
+            tier_key: tier.key,
+            result_count: parsed.length
+          }
+        })
+        return parsed
+      } catch (e: any) {
+        await recordExternalApiCall({
+          userId: context.userId || null,
+          runId: context.runId || null,
+          slotId: context.slotId || null,
+          callSiteName: "digest.news.google_news_rss",
+          filePath: "lib/digest/generator.ts",
+          functionName: "fetchGoogleNewsForTier",
+          provider: "google_news",
+          endpoint: "rss.search",
+          requestUnits: 1,
+          latencyMs: Date.now() - startedAt,
+          success: false,
+          statusCode: statusCode || getExternalApiStatusCode(e),
+          errorMessage: getExternalApiErrorMessage(e),
+          metadata: {
+            query: `${baseQuery} ${tier.operator}`.trim(),
+            tier_key: tier.key
+          }
+        })
+        throw e
+      }
     })
   )
 
@@ -1171,7 +1312,7 @@ async function fetchNewsArticlesForTier(
 
   let googleArticles: NewsArticle[] = []
   if (tavilySubstantiveCount < MIN_TAVILY_SUBSTANTIVE_TO_SKIP_GOOGLE) {
-    googleArticles = await fetchGoogleNewsForTier(queries, tier)
+    googleArticles = await fetchGoogleNewsForTier(queries, tier, context)
   }
 
   const combined = [...tavilyArticles, ...googleArticles]
@@ -1531,7 +1672,12 @@ export async function generateDailyNewsTopics(input: {
         const alreadyHydrated = articlesToProcess.filter((article) => hasUsableContentPreview(article))
         const needsHydration = articlesToProcess.filter((article) => !hasUsableContentPreview(article))
         const freshlyHydrated = await Promise.all(
-          needsHydration.slice(0, 8).map((article) => hydrateArticlePreview(article))
+          needsHydration.slice(0, 8).map((article) => hydrateArticlePreview(article, {
+            userId: input.userId,
+            runId,
+            slotId: topic.id,
+            tierKey: tier.key
+          }))
         )
         const allArticles = [
           ...alreadyHydrated,

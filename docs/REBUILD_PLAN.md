@@ -1,7 +1,7 @@
 # Rune Rebuild Plan
 
 Last updated: 2026-05-24
-Version: 1.5
+Version: 1.6
 File: `docs/REBUILD_PLAN.md`
 
 This document is the source of truth for the Rune rebuild. It pins down the sequence, scope, exit criteria, and architectural direction so the team does not keep re-litigating the plan in chat.
@@ -531,7 +531,7 @@ Acceptance criteria:
 
 1. Continue collecting real Phase 0a baseline runs.
 2. Classify `app/api/digest/fetch-emails` and `app/api/backfill/start` as either dev-only routes to gate/remove or production routes to repoint to shared modules.
-3. Add Google News RSS and article hydration telemetry if fallback quality or latency remains opaque.
+3. Decide whether Google News RSS/web hydration metadata should keep raw public queries or move to hashed query labels in Phase 0b.
 4. Draft the Phase 0a Exit Memo after the 5-day/3-user baseline is met or explicitly waived.
 5. Review inventory completeness before starting the Phase 0b LLM gateway.
 
@@ -560,6 +560,7 @@ Acceptance criteria:
 
 | Version | Date | Changes |
 | --- | --- | --- |
+| 1.6 | 2026-05-24 | Added Google News RSS and web article hydration telemetry to Phase 0a coverage. |
 | 1.5 | 2026-05-24 | Added Gmail/OAuth runtime telemetry coverage, privacy-minimal telemetry decision, and updated immediate Phase 0a tasks. |
 | 1.4 | 2026-05-24 | Added Phase 0a run-health query and snapshot artifact for controlled production measurement. |
 | 1.3 | 2026-05-22 | Updated Phase 0a artifact names to match implementation, added external API inventory/baseline and cleanup ledger as explicit Phase 0a artifacts, and clarified scope as no product behavior refactors. |
