@@ -14,6 +14,51 @@ export type ExternalApiTelemetryContext = {
   metadata?: Record<string, any>
 }
 
+export function getExternalApiStatusCode(error: any): number | null {
+  const candidates = [
+    error?.status,
+    error?.code,
+    error?.response?.status,
+    error?.response?.statusCode,
+  ]
+
+  for (const value of candidates) {
+    const numeric = Number(value)
+    if (Number.isInteger(numeric) && numeric >= 100 && numeric <= 599) {
+      return numeric
+    }
+  }
+
+  return null
+}
+
+export function getExternalApiResponseStatus(response: any): number | null {
+  const candidates = [
+    response?.status,
+    response?.res?.status,
+    response?.response?.status,
+  ]
+
+  for (const value of candidates) {
+    const numeric = Number(value)
+    if (Number.isInteger(numeric) && numeric >= 100 && numeric <= 599) {
+      return numeric
+    }
+  }
+
+  return null
+}
+
+export function getExternalApiErrorMessage(error: any): string {
+  return String(
+    error?.errors?.[0]?.message ||
+      error?.response?.data?.error_description ||
+      error?.response?.data?.error ||
+      error?.message ||
+      error
+  ).slice(0, 500)
+}
+
 export async function recordExternalApiCall(record: ExternalApiTelemetryContext & {
   latencyMs: number
   success: boolean

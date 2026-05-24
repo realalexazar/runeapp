@@ -1,7 +1,7 @@
 # Rune Rebuild Plan
 
-Last updated: 2026-05-22
-Version: 1.3
+Last updated: 2026-05-24
+Version: 1.5
 File: `docs/REBUILD_PLAN.md`
 
 This document is the source of truth for the Rune rebuild. It pins down the sequence, scope, exit criteria, and architectural direction so the team does not keep re-litigating the plan in chat.
@@ -125,7 +125,9 @@ Deliverables:
 - `supabase/migrations/20260522090000_phase0a_telemetry.sql` telemetry storage migration.
 - Minimal logging helper used by existing call sites.
 - `docs/phase0a_llm_cost_baseline.sql` query for LLM cost per run and cost by call site.
-- `docs/phase0a_external_api_baseline.sql` query for Tavily/search API usage.
+- `docs/phase0a_external_api_baseline.sql` query for quota-sensitive external API usage.
+- `docs/phase0a_run_health.sql` query joining generated runs to LLM and external API telemetry.
+- `docs/phase0a_snapshot_YYYY-MM-DD.md` snapshots for controlled or real baseline runs.
 - End-to-end run health query covering run success rate, slot success rate, total latency, total estimated cost, and failure reasons.
 
 Call-site inventory columns:
@@ -527,11 +529,11 @@ Acceptance criteria:
 
 ## Immediate Next Tasks
 
-1. Create static LLM/search call-site inventory.
-2. Draft telemetry migration.
-3. Add minimal telemetry helper without changing behavior.
-4. Collect baseline runs.
-5. Review inventory before starting gateway work.
+1. Continue collecting real Phase 0a baseline runs.
+2. Classify `app/api/digest/fetch-emails` and `app/api/backfill/start` as either dev-only routes to gate/remove or production routes to repoint to shared modules.
+3. Add Google News RSS and article hydration telemetry if fallback quality or latency remains opaque.
+4. Draft the Phase 0a Exit Memo after the 5-day/3-user baseline is met or explicitly waived.
+5. Review inventory completeness before starting the Phase 0b LLM gateway.
 
 ## Decision Log
 
@@ -542,6 +544,7 @@ Acceptance criteria:
 | Graph APIs before graph database | Locked | Preserve optionality and reveal real access patterns |
 | Plain Postgres backing in Phase 1 | Locked | Fastest way to validate domain model |
 | No Phase 0c feature expansion | Locked | Stabilization must stay scoped |
+| Gmail/OAuth telemetry must be privacy-minimal | Locked | Measure quota, latency, and failure rates without storing message ids, subjects, sender addresses, OAuth tokens, private bodies, or raw Gmail queries |
 
 ## Open Questions
 
@@ -557,6 +560,8 @@ Acceptance criteria:
 
 | Version | Date | Changes |
 | --- | --- | --- |
+| 1.5 | 2026-05-24 | Added Gmail/OAuth runtime telemetry coverage, privacy-minimal telemetry decision, and updated immediate Phase 0a tasks. |
+| 1.4 | 2026-05-24 | Added Phase 0a run-health query and snapshot artifact for controlled production measurement. |
 | 1.3 | 2026-05-22 | Updated Phase 0a artifact names to match implementation, added external API inventory/baseline and cleanup ledger as explicit Phase 0a artifacts, and clarified scope as no product behavior refactors. |
 | 1.2 | 2026-05-22 | Added file path, current alpha state placeholder, human tie-breaker role, Phase Exit Memo process, `slot_run_id`, waiver recording requirements, 15% post-migration cost threshold, graph access pattern logging fields, and numbered open questions. |
 | 1.1 | 2026-05-22 | Added Rune run definition, phase ownership, telemetry baseline duration, run health metrics, retention policy, migration rollback requirement, Phase 0c minimum tests, Phase 1 Rune-model prerequisite, Phase 2 scoring rubric deliverable, and changelog. |

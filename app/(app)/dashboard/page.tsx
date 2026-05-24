@@ -58,9 +58,6 @@ export default async function DashboardPage() {
           <div className="space-y-6">
             <DigestStatusCard />
             {process.env.NODE_ENV !== 'production' && <DevModePanel />}
-            <div className="rounded-2xl border border-white/10 bg-white/5 p-6 text-white">
-              <p className="text-white/60">Post-onboarding dashboard coming soon...</p>
-            </div>
           </div>
         ) : (
           <OnboardingFlow isConnected={isConnected} />
@@ -69,5 +66,4 @@ export default async function DashboardPage() {
     </section>
   )
 }
-
 

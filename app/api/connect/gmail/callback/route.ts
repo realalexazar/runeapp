@@ -3,6 +3,12 @@ import { getSupabaseServerClient } from "@/lib/supabase/server";
 import { google } from "googleapis";
 import { encrypt } from "@/lib/crypto";
 import { supabaseServiceRole } from "@/lib/supabase/service";
+import {
+  getExternalApiErrorMessage,
+  getExternalApiResponseStatus,
+  getExternalApiStatusCode,
+  recordExternalApiCall,
+} from "@/lib/ai/external-api-telemetry";
 
 export async function GET(request: Request) {
   const { searchParams, origin } = new URL(request.url);
@@ -33,7 +39,42 @@ export async function GET(request: Request) {
       `${process.env.NEXT_PUBLIC_SITE_URL}/api/connect/gmail/callback`
     );
 
-    const { tokens } = await oauth2Client.getToken(code);
+    const tokenStartedAt = Date.now();
+    let tokenResponse;
+    try {
+      tokenResponse = await oauth2Client.getToken(code);
+      await recordExternalApiCall({
+        userId: user.id,
+        callSiteName: "connect.gmail.google_oauth_get_token",
+        filePath: "app/api/connect/gmail/callback/route.ts",
+        functionName: "GET",
+        provider: "google_oauth",
+        endpoint: "oauth2.getToken",
+        requestUnits: 1,
+        latencyMs: Date.now() - tokenStartedAt,
+        success: true,
+        statusCode: getExternalApiResponseStatus(tokenResponse),
+        metadata: { flow: "gmail_connect" }
+      });
+    } catch (e: any) {
+      await recordExternalApiCall({
+        userId: user.id,
+        callSiteName: "connect.gmail.google_oauth_get_token",
+        filePath: "app/api/connect/gmail/callback/route.ts",
+        functionName: "GET",
+        provider: "google_oauth",
+        endpoint: "oauth2.getToken",
+        requestUnits: 1,
+        latencyMs: Date.now() - tokenStartedAt,
+        success: false,
+        statusCode: getExternalApiStatusCode(e),
+        errorMessage: getExternalApiErrorMessage(e),
+        metadata: { flow: "gmail_connect" }
+      });
+      throw e;
+    }
+
+    const { tokens } = tokenResponse;
     const { refresh_token } = tokens;
 
     if (!refresh_token) {
@@ -44,7 +85,42 @@ export async function GET(request: Request) {
     oauth2Client.setCredentials(tokens);
 
     const oauth2 = google.oauth2({ version: "v2", auth: oauth2Client });
-    const { data: userInfo } = await oauth2.userinfo.get();
+    const userInfoStartedAt = Date.now();
+    let userInfoResponse;
+    try {
+      userInfoResponse = await oauth2.userinfo.get();
+      await recordExternalApiCall({
+        userId: user.id,
+        callSiteName: "connect.gmail.google_oauth_userinfo",
+        filePath: "app/api/connect/gmail/callback/route.ts",
+        functionName: "GET",
+        provider: "google_oauth",
+        endpoint: "userinfo.get",
+        requestUnits: 1,
+        latencyMs: Date.now() - userInfoStartedAt,
+        success: true,
+        statusCode: getExternalApiResponseStatus(userInfoResponse),
+        metadata: { flow: "gmail_connect" }
+      });
+    } catch (e: any) {
+      await recordExternalApiCall({
+        userId: user.id,
+        callSiteName: "connect.gmail.google_oauth_userinfo",
+        filePath: "app/api/connect/gmail/callback/route.ts",
+        functionName: "GET",
+        provider: "google_oauth",
+        endpoint: "userinfo.get",
+        requestUnits: 1,
+        latencyMs: Date.now() - userInfoStartedAt,
+        success: false,
+        statusCode: getExternalApiStatusCode(e),
+        errorMessage: getExternalApiErrorMessage(e),
+        metadata: { flow: "gmail_connect" }
+      });
+      throw e;
+    }
+
+    const { data: userInfo } = userInfoResponse;
     if (!userInfo.id) throw new Error("Could not retrieve Google user ID.");
 
     const encryptedRefreshToken = encrypt(refresh_token);

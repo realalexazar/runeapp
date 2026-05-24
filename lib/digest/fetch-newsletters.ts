@@ -3,6 +3,12 @@ import { google, gmail_v1 } from "googleapis"
 import { decrypt } from "@/lib/crypto"
 import pLimit from "p-limit"
 import { extractSenderKey } from "@/lib/onboard/sender-extraction"
+import {
+  getExternalApiErrorMessage,
+  getExternalApiResponseStatus,
+  getExternalApiStatusCode,
+  recordExternalApiCall,
+} from "@/lib/ai/external-api-telemetry"
 
 type FetchResult = {
   ok: boolean
@@ -45,9 +51,37 @@ export async function fetchNewslettersForUser(userId: string, lookbackDays = 1):
 
   const gmail = google.gmail({ version: "v1", auth: oauth2Client })
 
+  const profileStartedAt = Date.now()
   try {
-    await gmail.users.getProfile({ userId: "me" })
-  } catch {
+    const response = await gmail.users.getProfile({ userId: "me" })
+    await recordExternalApiCall({
+      userId,
+      callSiteName: "digest.newsletters.gmail_profile",
+      filePath: "lib/digest/fetch-newsletters.ts",
+      functionName: "fetchNewslettersForUser",
+      provider: "gmail",
+      endpoint: "users.getProfile",
+      requestUnits: 1,
+      latencyMs: Date.now() - profileStartedAt,
+      success: true,
+      statusCode: getExternalApiResponseStatus(response),
+      metadata: { lookback_days: lookbackDays }
+    })
+  } catch (e: any) {
+    await recordExternalApiCall({
+      userId,
+      callSiteName: "digest.newsletters.gmail_profile",
+      filePath: "lib/digest/fetch-newsletters.ts",
+      functionName: "fetchNewslettersForUser",
+      provider: "gmail",
+      endpoint: "users.getProfile",
+      requestUnits: 1,
+      latencyMs: Date.now() - profileStartedAt,
+      success: false,
+      statusCode: getExternalApiStatusCode(e),
+      errorMessage: getExternalApiErrorMessage(e),
+      metadata: { lookback_days: lookbackDays }
+    })
     return { ok: false, emails_fetched: 0, items_stored: 0, error: "oauth_invalid" }
   }
 
@@ -101,6 +135,8 @@ export async function fetchNewslettersForUser(userId: string, lookbackDays = 1):
   let pageToken: string | undefined
 
   while (allMessageIds.length < 1000) {
+    const startedAt = Date.now()
+    const hadPageToken = Boolean(pageToken)
     try {
       const listResponse = await gmail.users.messages.list({
         userId: "me",
@@ -110,11 +146,50 @@ export async function fetchNewslettersForUser(userId: string, lookbackDays = 1):
       })
       const listRes = listResponse.data as gmail_v1.Schema$ListMessagesResponse
       const messages = listRes.messages || []
+      await recordExternalApiCall({
+        userId,
+        callSiteName: "digest.newsletters.gmail_messages_list",
+        filePath: "lib/digest/fetch-newsletters.ts",
+        functionName: "fetchNewslettersForUser",
+        provider: "gmail",
+        endpoint: "messages.list",
+        requestUnits: 5,
+        latencyMs: Date.now() - startedAt,
+        success: true,
+        statusCode: getExternalApiResponseStatus(listResponse),
+        metadata: {
+          lookback_days: lookbackDays,
+          selected_sender_count: selectedSenderKeys.length,
+          max_results: 500,
+          had_page_token: hadPageToken,
+          messages_returned: messages.length,
+          has_next_page: Boolean(listRes.nextPageToken)
+        }
+      })
       if (messages.length === 0) break
       for (const m of messages) { if (m.id) allMessageIds.push(m.id) }
       pageToken = listRes.nextPageToken || undefined
       if (!pageToken) break
     } catch (e: any) {
+      await recordExternalApiCall({
+        userId,
+        callSiteName: "digest.newsletters.gmail_messages_list",
+        filePath: "lib/digest/fetch-newsletters.ts",
+        functionName: "fetchNewslettersForUser",
+        provider: "gmail",
+        endpoint: "messages.list",
+        requestUnits: 5,
+        latencyMs: Date.now() - startedAt,
+        success: false,
+        statusCode: getExternalApiStatusCode(e),
+        errorMessage: getExternalApiErrorMessage(e),
+        metadata: {
+          lookback_days: lookbackDays,
+          selected_sender_count: selectedSenderKeys.length,
+          max_results: 500,
+          had_page_token: hadPageToken
+        }
+      })
       if (e?.errors?.[0]?.reason === "rateLimitExceeded" || e?.code === 429) {
         await new Promise(r => setTimeout(r, 1500))
         continue
@@ -131,12 +206,29 @@ export async function fetchNewslettersForUser(userId: string, lookbackDays = 1):
   const metadataResults = await Promise.all(
     allMessageIds.map(messageId =>
       metadataLimit(async () => {
+        const startedAt = Date.now()
         try {
           const res = await gmail.users.messages.get({
             userId: "me",
             id: messageId,
             format: "metadata",
             metadataHeaders: ["From", "Subject", "Date", "Return-Path", "DKIM-Signature", "Message-Id"]
+          })
+          await recordExternalApiCall({
+            userId,
+            callSiteName: "digest.newsletters.gmail_messages_get_metadata",
+            filePath: "lib/digest/fetch-newsletters.ts",
+            functionName: "fetchNewslettersForUser",
+            provider: "gmail",
+            endpoint: "messages.get.metadata",
+            requestUnits: 1,
+            latencyMs: Date.now() - startedAt,
+            success: true,
+            statusCode: getExternalApiResponseStatus(res),
+            metadata: {
+              lookback_days: lookbackDays,
+              selected_sender_count: selectedSenderKeys.length
+            }
           })
           const headers = res.data.payload?.headers || []
           const getHeader = (name: string) => headers.find(h => h.name?.toLowerCase() === name.toLowerCase())?.value || undefined
@@ -160,7 +252,26 @@ export async function fetchNewslettersForUser(userId: string, lookbackDays = 1):
             from_email: fromEmail || null,
             received_at: res.data.internalDate ? new Date(Number(res.data.internalDate)).toISOString() : null,
           }
-        } catch { return null }
+        } catch (e: any) {
+          await recordExternalApiCall({
+            userId,
+            callSiteName: "digest.newsletters.gmail_messages_get_metadata",
+            filePath: "lib/digest/fetch-newsletters.ts",
+            functionName: "fetchNewslettersForUser",
+            provider: "gmail",
+            endpoint: "messages.get.metadata",
+            requestUnits: 1,
+            latencyMs: Date.now() - startedAt,
+            success: false,
+            statusCode: getExternalApiStatusCode(e),
+            errorMessage: getExternalApiErrorMessage(e),
+            metadata: {
+              lookback_days: lookbackDays,
+              selected_sender_count: selectedSenderKeys.length
+            }
+          })
+          return null
+        }
       })
     )
   )
@@ -174,11 +285,47 @@ export async function fetchNewslettersForUser(userId: string, lookbackDays = 1):
   const bodyResults = await Promise.all(
     filtered.map(msg =>
       bodyLimit(async () => {
+        const startedAt = Date.now()
         try {
           const res = await gmail.users.messages.get({ userId: "me", id: msg.provider_message_id, format: "full" })
+          await recordExternalApiCall({
+            userId,
+            callSiteName: "digest.newsletters.gmail_messages_get_full",
+            filePath: "lib/digest/fetch-newsletters.ts",
+            functionName: "fetchNewslettersForUser",
+            provider: "gmail",
+            endpoint: "messages.get.full",
+            requestUnits: 1,
+            latencyMs: Date.now() - startedAt,
+            success: true,
+            statusCode: getExternalApiResponseStatus(res),
+            metadata: {
+              lookback_days: lookbackDays,
+              selected_sender_count: selectedSenderKeys.length
+            }
+          })
           const parsed = parsePayload(res.data.payload)
           return { ...msg, html_content: parsed.html, text_content: parsed.text, links: parsed.links }
-        } catch { return null }
+        } catch (e: any) {
+          await recordExternalApiCall({
+            userId,
+            callSiteName: "digest.newsletters.gmail_messages_get_full",
+            filePath: "lib/digest/fetch-newsletters.ts",
+            functionName: "fetchNewslettersForUser",
+            provider: "gmail",
+            endpoint: "messages.get.full",
+            requestUnits: 1,
+            latencyMs: Date.now() - startedAt,
+            success: false,
+            statusCode: getExternalApiStatusCode(e),
+            errorMessage: getExternalApiErrorMessage(e),
+            metadata: {
+              lookback_days: lookbackDays,
+              selected_sender_count: selectedSenderKeys.length
+            }
+          })
+          return null
+        }
       })
     )
   )

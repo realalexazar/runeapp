@@ -1,6 +1,6 @@
 -- Phase 0a external API baseline query.
 -- Run after applying supabase/migrations/20260522090000_phase0a_telemetry.sql
--- and collecting real Tavily/search usage.
+-- and collecting real quota-sensitive external API usage.
 
 SELECT
   call_site_name,
@@ -15,7 +15,8 @@ SELECT
   sum(estimated_cost_usd) AS estimated_cost_usd,
   avg(latency_ms)::integer AS avg_latency_ms,
   percentile_cont(0.95) WITHIN GROUP (ORDER BY latency_ms)::integer AS p95_latency_ms,
-  sum((metadata->>'result_count')::integer) FILTER (WHERE metadata ? 'result_count') AS result_count
+  sum((metadata->>'result_count')::integer) FILTER (WHERE metadata ? 'result_count') AS result_count,
+  sum((metadata->>'messages_returned')::integer) FILTER (WHERE metadata ? 'messages_returned') AS gmail_messages_returned
 FROM public.external_api_call_telemetry
 WHERE created_at >= now() - interval '5 days'
 GROUP BY

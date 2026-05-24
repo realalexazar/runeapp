@@ -5,6 +5,10 @@ import { callOpenAIChatCompletion } from "@/lib/openai/chat"
 import { decrypt } from "@/lib/crypto"
 import { shouldSkipLLM } from "@/lib/onboard/hard-rules"
 import pLimit from "p-limit"
+import {
+  getExternalApiErrorMessage,
+  recordExternalApiCall,
+} from "@/lib/ai/external-api-telemetry"
 
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY
 const SCAN_WINDOW_DAYS = 14
@@ -72,19 +76,53 @@ export async function POST() {
       }, { status: 401 })
     }
 
-    const tokenResp = await fetch("https://oauth2.googleapis.com/token", {
-      method: "POST",
-      headers: { "Content-Type": "application/x-www-form-urlencoded" },
-      body: new URLSearchParams({
-        client_id: process.env.GOOGLE_OAUTH_CLIENT_ID!,
-        client_secret: process.env.GOOGLE_OAUTH_CLIENT_SECRET!,
-        refresh_token: refreshToken,
-        grant_type: "refresh_token",
-      }),
-    })
+    let tokenResp: Response
+    const tokenStartedAt = Date.now()
+    try {
+      tokenResp = await fetch("https://oauth2.googleapis.com/token", {
+        method: "POST",
+        headers: { "Content-Type": "application/x-www-form-urlencoded" },
+        body: new URLSearchParams({
+          client_id: process.env.GOOGLE_OAUTH_CLIENT_ID!,
+          client_secret: process.env.GOOGLE_OAUTH_CLIENT_SECRET!,
+          refresh_token: refreshToken,
+          grant_type: "refresh_token",
+        }),
+      })
+    } catch (e: any) {
+      await recordExternalApiCall({
+        userId: user.id,
+        callSiteName: "onboard.scan_inbox.google_oauth_token",
+        filePath: "app/api/onboard/scan-inbox/route.ts",
+        functionName: "POST",
+        provider: "google_oauth",
+        endpoint: "token",
+        requestUnits: 1,
+        latencyMs: Date.now() - tokenStartedAt,
+        success: false,
+        statusCode: null,
+        errorMessage: getExternalApiErrorMessage(e),
+        metadata: { grant_type: "refresh_token" }
+      })
+      throw e
+    }
 
     if (!tokenResp.ok) {
       const tokenErr = await tokenResp.text()
+      await recordExternalApiCall({
+        userId: user.id,
+        callSiteName: "onboard.scan_inbox.google_oauth_token",
+        filePath: "app/api/onboard/scan-inbox/route.ts",
+        functionName: "POST",
+        provider: "google_oauth",
+        endpoint: "token",
+        requestUnits: 1,
+        latencyMs: Date.now() - tokenStartedAt,
+        success: false,
+        statusCode: tokenResp.status,
+        errorMessage: tokenErr.slice(0, 500),
+        metadata: { grant_type: "refresh_token" }
+      })
       console.error("Token exchange failed:", tokenErr)
       return NextResponse.json({
         ok: false, error: "Failed to exchange refresh token",
@@ -94,6 +132,19 @@ export async function POST() {
     }
 
     const { access_token: accessToken } = await tokenResp.json()
+    await recordExternalApiCall({
+      userId: user.id,
+      callSiteName: "onboard.scan_inbox.google_oauth_token",
+      filePath: "app/api/onboard/scan-inbox/route.ts",
+      functionName: "POST",
+      provider: "google_oauth",
+      endpoint: "token",
+      requestUnits: 1,
+      latencyMs: Date.now() - tokenStartedAt,
+      success: true,
+      statusCode: tokenResp.status,
+      metadata: { grant_type: "refresh_token" }
+    })
 
     // 3. List messages from primary, last 14 days
     const query = encodeURIComponent(`category:primary newer_than:${SCAN_WINDOW_DAYS}d`)
@@ -104,10 +155,53 @@ export async function POST() {
       const url = `https://gmail.googleapis.com/gmail/v1/users/me/messages?q=${query}&maxResults=500${
         pageToken ? `&pageToken=${pageToken}` : ""
       }`
-      const resp = await fetch(url, { headers: { Authorization: `Bearer ${accessToken}` } })
+      const listStartedAt = Date.now()
+      const hadPageToken = Boolean(pageToken)
+      let resp: Response
+      try {
+        resp = await fetch(url, { headers: { Authorization: `Bearer ${accessToken}` } })
+      } catch (e: any) {
+        await recordExternalApiCall({
+          userId: user.id,
+          callSiteName: "onboard.scan_inbox.gmail_messages_list",
+          filePath: "app/api/onboard/scan-inbox/route.ts",
+          functionName: "POST",
+          provider: "gmail",
+          endpoint: "messages.list",
+          requestUnits: 5,
+          latencyMs: Date.now() - listStartedAt,
+          success: false,
+          statusCode: null,
+          errorMessage: getExternalApiErrorMessage(e),
+          metadata: {
+            scan_window_days: SCAN_WINDOW_DAYS,
+            max_results: 500,
+            had_page_token: hadPageToken
+          }
+        })
+        throw e
+      }
 
       if (!resp.ok) {
         const errText = await resp.text()
+        await recordExternalApiCall({
+          userId: user.id,
+          callSiteName: "onboard.scan_inbox.gmail_messages_list",
+          filePath: "app/api/onboard/scan-inbox/route.ts",
+          functionName: "POST",
+          provider: "gmail",
+          endpoint: "messages.list",
+          requestUnits: 5,
+          latencyMs: Date.now() - listStartedAt,
+          success: false,
+          statusCode: resp.status,
+          errorMessage: errText.slice(0, 500),
+          metadata: {
+            scan_window_days: SCAN_WINDOW_DAYS,
+            max_results: 500,
+            had_page_token: hadPageToken
+          }
+        })
         console.error("Gmail list error:", errText)
         if (resp.status === 401) {
           return NextResponse.json({
@@ -120,6 +214,25 @@ export async function POST() {
 
       const data = await resp.json()
       const messages = data.messages || []
+      await recordExternalApiCall({
+        userId: user.id,
+        callSiteName: "onboard.scan_inbox.gmail_messages_list",
+        filePath: "app/api/onboard/scan-inbox/route.ts",
+        functionName: "POST",
+        provider: "gmail",
+        endpoint: "messages.list",
+        requestUnits: 5,
+        latencyMs: Date.now() - listStartedAt,
+        success: true,
+        statusCode: resp.status,
+        metadata: {
+          scan_window_days: SCAN_WINDOW_DAYS,
+          max_results: 500,
+          had_page_token: hadPageToken,
+          messages_returned: messages.length,
+          has_next_page: Boolean(data.nextPageToken)
+        }
+      })
       if (messages.length === 0) break
       allMessages.push(...messages)
       pageToken = data.nextPageToken
@@ -142,14 +255,68 @@ export async function POST() {
     const results = await Promise.all(
       allMessages.map((msg) =>
         metadataLimit(async () => {
+          const metadataStartedAt = Date.now()
+          let metaStatus: number | null = null
           try {
             const metaResp = await fetch(
               `https://gmail.googleapis.com/gmail/v1/users/me/messages/${msg.id}?format=metadata&metadataHeaders=From&metadataHeaders=Subject`,
               { headers: { Authorization: `Bearer ${accessToken}` } }
             )
-            if (!metaResp.ok) return null
-            return metaResp.json()
-          } catch {
+            metaStatus = metaResp.status
+            if (!metaResp.ok) {
+              const errText = await metaResp.text().catch(() => "")
+              await recordExternalApiCall({
+                userId: user.id,
+                callSiteName: "onboard.scan_inbox.gmail_messages_get_metadata",
+                filePath: "app/api/onboard/scan-inbox/route.ts",
+                functionName: "POST",
+                provider: "gmail",
+                endpoint: "messages.get.metadata",
+                requestUnits: 1,
+                latencyMs: Date.now() - metadataStartedAt,
+                success: false,
+                statusCode: metaStatus,
+                errorMessage: errText.slice(0, 500),
+                metadata: {
+                  scan_window_days: SCAN_WINDOW_DAYS
+                }
+              })
+              return null
+            }
+            const data = await metaResp.json()
+            await recordExternalApiCall({
+              userId: user.id,
+              callSiteName: "onboard.scan_inbox.gmail_messages_get_metadata",
+              filePath: "app/api/onboard/scan-inbox/route.ts",
+              functionName: "POST",
+              provider: "gmail",
+              endpoint: "messages.get.metadata",
+              requestUnits: 1,
+              latencyMs: Date.now() - metadataStartedAt,
+              success: true,
+              statusCode: metaStatus,
+              metadata: {
+                scan_window_days: SCAN_WINDOW_DAYS
+              }
+            })
+            return data
+          } catch (e: any) {
+            await recordExternalApiCall({
+              userId: user.id,
+              callSiteName: "onboard.scan_inbox.gmail_messages_get_metadata",
+              filePath: "app/api/onboard/scan-inbox/route.ts",
+              functionName: "POST",
+              provider: "gmail",
+              endpoint: "messages.get.metadata",
+              requestUnits: 1,
+              latencyMs: Date.now() - metadataStartedAt,
+              success: false,
+              statusCode: metaStatus,
+              errorMessage: getExternalApiErrorMessage(e),
+              metadata: {
+                scan_window_days: SCAN_WINDOW_DAYS
+              }
+            })
             return null
           }
         })

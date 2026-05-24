@@ -4,6 +4,12 @@ import { supabaseServiceRole } from "@/lib/supabase/service"
 import { google } from "googleapis"
 import { decrypt } from "@/lib/crypto"
 import { getLessonStateFromMapping } from "@/lib/digest/content-modules"
+import {
+  getExternalApiErrorMessage,
+  getExternalApiResponseStatus,
+  getExternalApiStatusCode,
+  recordExternalApiCall,
+} from "@/lib/ai/external-api-telemetry"
 
 /**
  * GET /api/digest/verify
@@ -111,7 +117,39 @@ export async function GET() {
           
           // Test token with lightweight API call
           const gmail = google.gmail({ version: "v1", auth: oauth2Client })
-          await gmail.users.getProfile({ userId: "me" })
+          const profileStartedAt = Date.now()
+          try {
+            const profileResponse = await gmail.users.getProfile({ userId: "me" })
+            await recordExternalApiCall({
+              userId: user.id,
+              callSiteName: "digest.verify.gmail_profile",
+              filePath: "app/api/digest/verify/route.ts",
+              functionName: "GET",
+              provider: "gmail",
+              endpoint: "users.getProfile",
+              requestUnits: 1,
+              latencyMs: Date.now() - profileStartedAt,
+              success: true,
+              statusCode: getExternalApiResponseStatus(profileResponse),
+              metadata: { purpose: "oauth_validation" }
+            })
+          } catch (e: any) {
+            await recordExternalApiCall({
+              userId: user.id,
+              callSiteName: "digest.verify.gmail_profile",
+              filePath: "app/api/digest/verify/route.ts",
+              functionName: "GET",
+              provider: "gmail",
+              endpoint: "users.getProfile",
+              requestUnits: 1,
+              latencyMs: Date.now() - profileStartedAt,
+              success: false,
+              statusCode: getExternalApiStatusCode(e),
+              errorMessage: getExternalApiErrorMessage(e),
+              metadata: { purpose: "oauth_validation" }
+            })
+            throw e
+          }
           
           verification.oauth_token_valid = true
         } else {
