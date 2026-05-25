@@ -1,6 +1,8 @@
 import { NextResponse } from "next/server"
 import { getSupabaseServerClient } from "@/lib/supabase/server"
-import { callOpenAIChatCompletion, isTransientNetworkError } from "@/lib/openai/chat"
+import { isTransientNetworkError } from "@/lib/openai/chat"
+import { generateOpenAIObject } from "@/lib/ai/gateway"
+import { lessonTopicClarifierSchema } from "@/lib/ai/schemas/onboarding"
 
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY
 
@@ -57,23 +59,6 @@ Topic: "monetary policy and markets"
 User: "The second one. I want to actually understand the transmission mechanisms, not just trade the headline."
 -> done=true. lesson_scope: "10-day advanced curriculum on monetary policy transmission mechanisms and their impact on asset prices. User wants deep macro understanding, not tactical trading. By day 10: trace a policy rate change through the yield curve, credit spreads, equities, and real estate, and identify where the transmission lags and breaks down. Theory-heavy with historical case studies (e.g., 2013 taper tantrum, 2022 hiking cycle)."`
 
-function extractJsonObject(text: string): any | null {
-  const trimmed = text.trim()
-  try {
-    return JSON.parse(trimmed)
-  } catch {}
-  const start = trimmed.indexOf("{")
-  const end = trimmed.lastIndexOf("}")
-  if (start >= 0 && end > start) {
-    try {
-      return JSON.parse(trimmed.slice(start, end + 1))
-    } catch {
-      return null
-    }
-  }
-  return null
-}
-
 export async function POST(req: Request) {
   const supabase = await getSupabaseServerClient()
 
@@ -127,7 +112,7 @@ export async function POST(req: Request) {
     }
 
     const payload = { lesson_topic: topic, history }
-    const resp = await callOpenAIChatCompletion({
+    const parsed = await generateOpenAIObject({
       apiKey: OPENAI_API_KEY,
       model: "gpt-4o-mini",
       temperature: 0.5,
@@ -135,25 +120,21 @@ export async function POST(req: Request) {
         { role: "system", content: LESSON_CLARIFIER_PROMPT },
         { role: "user", content: JSON.stringify(payload) }
       ],
+      schema: lessonTopicClarifierSchema,
+      outputShapeName: "LessonTopicClarifier",
       telemetry: {
         userId: user.id,
         callSiteName: "onboard.clarify_lesson_topic",
         filePath: "app/api/onboard/clarify-lesson-topic/route.ts",
-        functionName: "POST",
-        validationStatus: "regex",
-        outputShapeName: "LessonTopicClarifier"
+        functionName: "POST"
       }
     })
 
-    const data = await resp.json()
-    const parsed = extractJsonObject(data?.choices?.[0]?.message?.content || "")
-    if (!parsed) throw new Error("Invalid clarifier JSON")
-
     return NextResponse.json({
       ok: true,
-      assistant_message: String(parsed.assistant_message || "").trim(),
-      done: !!parsed.done,
-      lesson_scope: parsed.lesson_scope ? String(parsed.lesson_scope) : null,
+      assistant_message: parsed.assistant_message,
+      done: parsed.done,
+      lesson_scope: parsed.lesson_scope,
       source: "llm"
     })
   } catch (e: any) {

@@ -1,7 +1,6 @@
 import { NextResponse } from "next/server"
 import { getSupabaseServerClient } from "@/lib/supabase/server"
 import { supabaseServiceRole } from "@/lib/supabase/service"
-import { callOpenAIChatCompletion } from "@/lib/openai/chat"
 import { decrypt } from "@/lib/crypto"
 import { shouldSkipLLM } from "@/lib/onboard/hard-rules"
 import pLimit from "p-limit"
@@ -9,6 +8,8 @@ import {
   getExternalApiErrorMessage,
   recordExternalApiCall,
 } from "@/lib/ai/external-api-telemetry"
+import { generateOpenAIObject } from "@/lib/ai/gateway"
+import { inboxSenderRelevanceSchema } from "@/lib/ai/schemas/onboarding"
 
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY
 const SCAN_WINDOW_DAYS = 14
@@ -18,17 +19,6 @@ function estimateFrequency(emailCount: number, windowDays: number): string {
   if (perWeek >= 5) return "daily"
   if (perWeek >= 1) return "weekly"
   return "occasional"
-}
-
-function extractJsonObject(text: string): any | null {
-  const trimmed = text.trim()
-  try { return JSON.parse(trimmed) } catch {}
-  const start = trimmed.indexOf("{")
-  const end = trimmed.lastIndexOf("}")
-  if (start >= 0 && end > start) {
-    try { return JSON.parse(trimmed.slice(start, end + 1)) } catch {}
-  }
-  return null
 }
 
 export async function POST() {
@@ -423,7 +413,7 @@ Return ONLY valid JSON:
   ]
 }`
 
-    const llmResp = await callOpenAIChatCompletion({
+    const parsed = await generateOpenAIObject({
       apiKey: OPENAI_API_KEY,
       model: "gpt-4o-mini",
       temperature: 0.3,
@@ -431,13 +421,13 @@ Return ONLY valid JSON:
         { role: "system", content: "You score email senders for relevance. Return strict JSON only." },
         { role: "user", content: classificationPrompt },
       ],
+      schema: inboxSenderRelevanceSchema,
+      outputShapeName: "InboxSenderRelevance",
       telemetry: {
         userId: user.id,
         callSiteName: "onboard.scan_inbox.sender_relevance",
         filePath: "app/api/onboard/scan-inbox/route.ts",
         functionName: "POST",
-        validationStatus: "regex",
-        outputShapeName: "InboxSenderRelevance",
         metadata: {
           candidate_count: senderEntries.length,
           scan_window_days: SCAN_WINDOW_DAYS
@@ -445,25 +435,7 @@ Return ONLY valid JSON:
       }
     })
 
-    const llmData = await llmResp.json()
-    const llmContent = llmData?.choices?.[0]?.message?.content || ""
-
-    let classified: Array<{
-      address: string
-      content_type: string
-      relevance_score: number
-      relevance_reason: string
-    }> = []
-
-    try {
-      const parsed = extractJsonObject(llmContent)
-      if (parsed?.senders && Array.isArray(parsed.senders)) {
-        classified = parsed.senders
-      }
-    } catch {
-      console.error("Failed to parse LLM classification response")
-      return NextResponse.json({ ok: false, error: "Failed to parse classification results" }, { status: 500 })
-    }
+    const classified = parsed.senders
 
     // 7. Upsert into inbox_analysis
     const upserts = classified.map((sender) => {

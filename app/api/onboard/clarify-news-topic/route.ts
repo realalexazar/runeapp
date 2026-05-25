@@ -1,6 +1,8 @@
 import { NextResponse } from "next/server"
 import { getSupabaseServerClient } from "@/lib/supabase/server"
-import { callOpenAIChatCompletion, isTransientNetworkError } from "@/lib/openai/chat"
+import { isTransientNetworkError } from "@/lib/openai/chat"
+import { generateOpenAIObject } from "@/lib/ai/gateway"
+import { newsTopicClarifierSchema } from "@/lib/ai/schemas/onboarding"
 
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY
 
@@ -49,23 +51,6 @@ OUTPUT FORMAT - every response must be exactly this JSON object:
 
 - When done=false: news_scope must be null.
 - When done=true: news_scope must be a concrete, actionable search instruction (1-3 sentences). assistant_message should briefly confirm what they'll receive.`
-
-function extractJsonObject(text: string): any | null {
-  const trimmed = text.trim()
-  try {
-    return JSON.parse(trimmed)
-  } catch {}
-  const start = trimmed.indexOf("{")
-  const end = trimmed.lastIndexOf("}")
-  if (start >= 0 && end > start) {
-    try {
-      return JSON.parse(trimmed.slice(start, end + 1))
-    } catch {
-      return null
-    }
-  }
-  return null
-}
 
 export async function POST(req: Request) {
   const supabase = await getSupabaseServerClient()
@@ -120,7 +105,7 @@ export async function POST(req: Request) {
     }
 
     const payload = { news_topic: topic, history }
-    const resp = await callOpenAIChatCompletion({
+    const parsed = await generateOpenAIObject({
       apiKey: OPENAI_API_KEY,
       model: "gpt-4o-mini",
       temperature: 0.5,
@@ -128,25 +113,21 @@ export async function POST(req: Request) {
         { role: "system", content: NEWS_CLARIFIER_PROMPT },
         { role: "user", content: JSON.stringify(payload) }
       ],
+      schema: newsTopicClarifierSchema,
+      outputShapeName: "NewsTopicClarifier",
       telemetry: {
         userId: user.id,
         callSiteName: "onboard.clarify_news_topic",
         filePath: "app/api/onboard/clarify-news-topic/route.ts",
-        functionName: "POST",
-        validationStatus: "regex",
-        outputShapeName: "NewsTopicClarifier"
+        functionName: "POST"
       }
     })
 
-    const data = await resp.json()
-    const parsed = extractJsonObject(data?.choices?.[0]?.message?.content || "")
-    if (!parsed) throw new Error("Invalid clarifier JSON")
-
     return NextResponse.json({
       ok: true,
-      assistant_message: String(parsed.assistant_message || "").trim(),
-      done: !!parsed.done,
-      news_scope: parsed.news_scope ? String(parsed.news_scope) : null,
+      assistant_message: parsed.assistant_message,
+      done: parsed.done,
+      news_scope: parsed.news_scope,
       source: "llm"
     })
   } catch (e: any) {

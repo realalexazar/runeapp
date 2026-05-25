@@ -1,7 +1,8 @@
 import { NextResponse } from "next/server"
 import { getSupabaseServerClient } from "@/lib/supabase/server"
 import { supabaseServiceRole } from "@/lib/supabase/service"
-import { callOpenAIChatCompletion } from "@/lib/openai/chat"
+import { generateOpenAIObject } from "@/lib/ai/gateway"
+import { topicMappingResultSchema } from "@/lib/ai/schemas/onboarding"
 
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY
 const DAILY_ONLY_CADENCE = "daily"
@@ -81,23 +82,6 @@ function buildLessonMappingJson(
   return base
 }
 
-function extractJsonObject(text: string): any | null {
-  const trimmed = text.trim()
-  try {
-    return JSON.parse(trimmed)
-  } catch {}
-  const start = trimmed.indexOf("{")
-  const end = trimmed.lastIndexOf("}")
-  if (start >= 0 && end > start) {
-    try {
-      return JSON.parse(trimmed.slice(start, end + 1))
-    } catch {
-      return null
-    }
-  }
-  return null
-}
-
 async function mapTopicsWithLLM(input: {
   userId?: string | null
   newsTopic: string | null
@@ -164,7 +148,7 @@ Rules:
 - No markdown, no prose outside JSON.`
 
   try {
-    const res = await callOpenAIChatCompletion({
+    const parsed = await generateOpenAIObject({
       apiKey: OPENAI_API_KEY,
       model: "gpt-4o-mini",
       temperature: 0.2,
@@ -172,20 +156,15 @@ Rules:
         { role: "system", content: systemPrompt },
         { role: "user", content: JSON.stringify(userPayload) }
       ],
+      schema: topicMappingResultSchema,
+      outputShapeName: "TopicMappingResult",
       telemetry: {
         userId: input.userId || null,
         callSiteName: "digest.config.topic_mapping",
         filePath: "app/api/digest/config/route.ts",
-        functionName: "mapTopicsWithLLM",
-        validationStatus: "regex",
-        outputShapeName: "TopicMappingResult"
+        functionName: "mapTopicsWithLLM"
       }
     })
-
-    const data = await res.json()
-    const content = data?.choices?.[0]?.message?.content || ""
-    const parsed = extractJsonObject(content)
-    if (!parsed) throw new Error("Invalid topic mapping JSON")
 
     const news = parsed.news && input.newsTopic
       ? {

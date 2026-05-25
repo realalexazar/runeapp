@@ -1,7 +1,7 @@
 # Rune Rebuild Plan
 
 Last updated: 2026-05-24
-Version: 1.7
+Version: 1.8
 File: `docs/REBUILD_PLAN.md`
 
 This document is the source of truth for the Rune rebuild. It pins down the sequence, scope, exit criteria, and architectural direction so the team does not keep re-litigating the plan in chat.
@@ -529,11 +529,11 @@ Acceptance criteria:
 
 ## Immediate Next Tasks
 
-1. Continue collecting real Phase 0a baseline runs.
-2. Classify `app/api/digest/fetch-emails` and `app/api/backfill/start` as either dev-only routes to gate/remove or production routes to repoint to shared modules.
-3. Decide whether Google News RSS/web hydration metadata should keep raw public queries or move to hashed query labels in Phase 0b.
-4. Draft the Phase 0a Exit Memo after the 5-day/3-user baseline is met or explicitly waived.
-5. Review inventory completeness before starting the Phase 0b LLM gateway.
+1. Continue migrating remaining high-risk/expensive LLM call sites through the Phase 0b gateway, with daily news synthesis last.
+2. Continue collecting real Phase 0a/0b baseline runs.
+3. Classify `app/api/digest/fetch-emails` and `app/api/backfill/start` as either dev-only routes to gate/remove or production routes to repoint to shared modules.
+4. Decide whether Google News RSS/web hydration metadata should keep raw public queries or move to hashed query labels in Phase 0b.
+5. Draft the Phase 0a Exit Memo after the 5-day/3-user baseline is met or explicitly waived.
 
 ## Decision Log
 
@@ -561,6 +561,7 @@ Acceptance criteria:
 
 | Version | Date | Changes |
 | --- | --- | --- |
+| 1.8 | 2026-05-25 | Migrated low-risk onboarding/config JSON call sites and inbox sender relevance onto the Phase 0b schema gateway. |
 | 1.7 | 2026-05-24 | Started Phase 0b gateway with schema validation, validation-failure capture, and first low-risk call-site migration. |
 | 1.6 | 2026-05-24 | Added Google News RSS and web article hydration telemetry to Phase 0a coverage. |
 | 1.5 | 2026-05-24 | Added Gmail/OAuth runtime telemetry coverage, privacy-minimal telemetry decision, and updated immediate Phase 0a tasks. |

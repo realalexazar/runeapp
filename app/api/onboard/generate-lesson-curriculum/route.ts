@@ -1,6 +1,8 @@
 import { NextResponse } from "next/server"
 import { getSupabaseServerClient } from "@/lib/supabase/server"
-import { callOpenAIChatCompletion, isTransientNetworkError } from "@/lib/openai/chat"
+import { isTransientNetworkError } from "@/lib/openai/chat"
+import { generateOpenAIObject } from "@/lib/ai/gateway"
+import { lessonCurriculumSchema } from "@/lib/ai/schemas/lesson-curriculum"
 
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY
 
@@ -99,23 +101,6 @@ Short, specific, no filler. Max 10 words. "CRE Value-Add Underwriting" not "Your
 
 Do not broaden beyond the sub-domain in the scope. If the scope says B2B SaaS, don't drift into consumer. If it says underwriting, don't spend three days on property management.`
 
-function extractJsonObject(text: string): any | null {
-  const trimmed = text.trim()
-  try {
-    return JSON.parse(trimmed)
-  } catch {}
-  const start = trimmed.indexOf("{")
-  const end = trimmed.lastIndexOf("}")
-  if (start >= 0 && end > start) {
-    try {
-      return JSON.parse(trimmed.slice(start, end + 1))
-    } catch {
-      return null
-    }
-  }
-  return null
-}
-
 function fallbackCurriculum(topic: string, scope: string | null, dayCount: number) {
   const days = Array.from({ length: dayCount }).map((_, idx) => ({
     day: idx + 1,
@@ -182,7 +167,7 @@ export async function POST(req: Request) {
       curriculum_days: curriculumDays
     }
 
-    const resp = await callOpenAIChatCompletion({
+    const curriculum = await generateOpenAIObject({
       apiKey: OPENAI_API_KEY,
       model: "gpt-4o-mini",
       temperature: 0.2,
@@ -190,23 +175,19 @@ export async function POST(req: Request) {
         { role: "system", content: LESSON_CURRICULUM_PROMPT },
         { role: "user", content: JSON.stringify(payload) }
       ],
+      schema: lessonCurriculumSchema,
+      outputShapeName: "LessonCurriculum",
       telemetry: {
         userId: user.id,
         callSiteName: "onboard.generate_lesson_curriculum",
         filePath: "app/api/onboard/generate-lesson-curriculum/route.ts",
-        functionName: "POST",
-        validationStatus: "regex",
-        outputShapeName: "LessonCurriculum"
+        functionName: "POST"
       }
     })
 
-    const data = await resp.json()
-    const parsed = extractJsonObject(data?.choices?.[0]?.message?.content || "")
-    if (!parsed) throw new Error("Invalid curriculum JSON")
-
     return NextResponse.json({
       ok: true,
-      curriculum: parsed,
+      curriculum,
       source: "llm"
     })
   } catch (e: any) {
