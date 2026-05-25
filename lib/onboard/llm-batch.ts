@@ -4,7 +4,8 @@
  */
 
 import pLimit from "p-limit"
-import { estimateTextTokens, recordLlmCall } from "@/lib/ai/llm-telemetry"
+import { generateOpenAIObject } from "@/lib/ai/gateway"
+import { senderClassificationBatchSchema } from "@/lib/ai/schemas/onboarding"
 
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY
 const BATCH_SIZE = 20 // Candidates per API call
@@ -125,17 +126,17 @@ Classification options:
 - "No" = Definitely NOT a newsletter (transactional, promotional, personal, or automated)
 - "Uncertain" = Ambiguous or edge case (could be either, needs human review)
 
-Respond with a JSON array in this exact format:
-[
-  {"candidate": ${offset + 1}, "classification": "Yes"},
-  {"candidate": ${offset + 2}, "classification": "Uncertain"},
-  {"candidate": ${offset + 3}, "classification": "No"}
-]
+Respond with a JSON object in this exact format:
+{
+  "classifications": [
+    {"candidate": ${offset + 1}, "classification": "Yes"},
+    {"candidate": ${offset + 2}, "classification": "Uncertain"},
+    {"candidate": ${offset + 3}, "classification": "No"}
+  ]
+}
 
 Use the candidate number from above (${offset + 1}, ${offset + 2}, etc.).`
 
-  // Call OpenAI
-  let responseText: string
   try {
     if (!OPENAI_API_KEY) {
       console.warn("No OpenAI API key configured, marking all as uncertain")
@@ -146,11 +147,28 @@ Use the candidate number from above (${offset + 1}, ${offset + 2}, etc.).`
         low_confidence: c.count_14d < 3
       }))
     }
-    responseText = await callOpenAI(prompt, {
-      ...telemetry,
-      offset,
-      candidateCount: candidates.length
+
+    const parsed = await generateOpenAIObject({
+      apiKey: OPENAI_API_KEY,
+      model: "gpt-4o-mini",
+      temperature: 0.1,
+      maxTokens: 500,
+      messages: [{ role: "user", content: prompt }],
+      schema: senderClassificationBatchSchema,
+      outputShapeName: "SenderClassificationBatch",
+      telemetry: {
+        userId: telemetry?.userId || null,
+        callSiteName: "onboard.classify_senders.batch",
+        filePath: "lib/onboard/llm-batch.ts",
+        functionName: "classifyBatchSingle",
+        metadata: {
+          offset,
+          candidate_count: candidates.length
+        }
+      }
     })
+
+    return mapClassificationResponse(parsed.classifications, candidates, offset)
   } catch (e) {
     console.error("OpenAI batch classification error:", e)
     // Fallback: mark all as uncertain on error
@@ -161,145 +179,30 @@ Use the candidate number from above (${offset + 1}, ${offset + 2}, etc.).`
       low_confidence: c.count_14d < 3
     }))
   }
-
-  // Parse LLM response
-  const results = parseLLMResponse(responseText, candidates, offset)
-  return results
 }
 
-async function callOpenAI(
-  prompt: string,
-  telemetry?: BatchTelemetryContext & { offset: number; candidateCount: number }
-): Promise<string> {
-  const startedAt = Date.now()
-  const model = "gpt-4o-mini"
-  const inputTokens = estimateTextTokens(prompt)
-
-  try {
-    const response = await fetch("https://api.openai.com/v1/chat/completions", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "Authorization": `Bearer ${OPENAI_API_KEY}`
-      },
-      body: JSON.stringify({
-        model,
-        messages: [{ role: "user", content: prompt }],
-        temperature: 0.1,
-        max_tokens: 500
-      })
-    })
-
-    if (!response.ok) {
-      throw new Error(`OpenAI API error: ${response.status}`)
-    }
-
-    const data = await response.json()
-    const responseText = data.choices[0]?.message?.content?.trim() || ""
-
-    await recordLlmCall({
-      userId: telemetry?.userId || null,
-      callSiteName: "onboard.classify_senders.batch",
-      filePath: "lib/onboard/llm-batch.ts",
-      functionName: "callOpenAI",
-      provider: "openai",
-      model,
-      providerRequestId: data?.id || response.headers.get("x-request-id"),
-      inputTokens: Number(data?.usage?.prompt_tokens) || inputTokens,
-      outputTokens: Number(data?.usage?.completion_tokens) || estimateTextTokens(responseText),
-      latencyMs: Date.now() - startedAt,
-      success: true,
-      validationStatus: "regex",
-      outputShapeName: "SenderClassificationArray",
-      metadata: {
-        offset: telemetry?.offset,
-        candidate_count: telemetry?.candidateCount
-      }
-    })
-
-    return responseText
-  } catch (e: any) {
-    await recordLlmCall({
-      userId: telemetry?.userId || null,
-      callSiteName: "onboard.classify_senders.batch",
-      filePath: "lib/onboard/llm-batch.ts",
-      functionName: "callOpenAI",
-      provider: "openai",
-      model,
-      inputTokens,
-      outputTokens: null,
-      latencyMs: Date.now() - startedAt,
-      success: false,
-      errorMessage: String(e?.message || e),
-      validationStatus: "regex",
-      outputShapeName: "SenderClassificationArray",
-      metadata: {
-        offset: telemetry?.offset,
-        candidate_count: telemetry?.candidateCount
-      }
-    })
-    throw e
-  }
-}
-
-function parseLLMResponse(responseText: string, candidates: Candidate[], offset: number = 0): ClassificationResult[] {
+function mapClassificationResponse(
+  classifications: Array<{ candidate: number; classification: "Yes" | "No" | "Uncertain" }>,
+  candidates: Candidate[],
+  offset: number = 0
+): ClassificationResult[] {
   const results: ClassificationResult[] = []
-  
-  // Try to parse as JSON first
-  try {
-    const jsonMatch = responseText.match(/\[[\s\S]*\]/)
-    if (jsonMatch) {
-      const parsed = JSON.parse(jsonMatch[0])
-      const resultMap = new Map<number, "Yes" | "No" | "Uncertain">()
-      
-      for (const item of parsed) {
-        if (item.candidate && item.classification) {
-          resultMap.set(item.candidate, item.classification)
-        }
-      }
-      
-      for (let i = 0; i < candidates.length; i++) {
-        const candidateNumber = offset + i + 1
-        const classification = resultMap.get(candidateNumber) || "Uncertain"
-        results.push({
-          sender_key: candidates[i].sender_key,
-          bucket: classification === "Yes" ? "positive" : classification === "Uncertain" ? "grey" : "low",
-          sample_size: candidates[i].subjects.length,
-          low_confidence: candidates[i].count_14d < 3
-        })
-      }
-      
-      return results
-    }
-  } catch (e) {
-    // Fall back to line-by-line parsing
+
+  const resultMap = new Map<number, "Yes" | "No" | "Uncertain">()
+  for (const item of classifications) {
+    resultMap.set(item.candidate, item.classification)
   }
-  
-  // Fallback: parse line by line looking for "Yes", "No", "Uncertain"
-  const lines = responseText.split("\n")
+
   for (let i = 0; i < candidates.length; i++) {
-    const candidate = candidates[i]
     const candidateNumber = offset + i + 1
-    let classification: "Yes" | "No" | "Uncertain" = "Uncertain"
-    
-    // Look for classification in response (check a few lines around candidate number)
-    for (const line of lines) {
-      const lower = line.toLowerCase()
-      if (lower.includes(`candidate ${candidateNumber}`) || lower.includes(`candidate${candidateNumber}`)) {
-        if (lower.includes("yes") && !lower.includes("not")) classification = "Yes"
-        else if (lower.includes("no") && !lower.includes("not")) classification = "No"
-        else if (lower.includes("uncertain")) classification = "Uncertain"
-        break
-      }
-    }
-    
+    const classification = resultMap.get(candidateNumber) || "Uncertain"
     results.push({
-      sender_key: candidate.sender_key,
+      sender_key: candidates[i].sender_key,
       bucket: classification === "Yes" ? "positive" : classification === "Uncertain" ? "grey" : "low",
-      sample_size: candidate.subjects.length,
-      low_confidence: candidate.count_14d < 3
+      sample_size: candidates[i].subjects.length,
+      low_confidence: candidates[i].count_14d < 3
     })
   }
-  
+
   return results
 }

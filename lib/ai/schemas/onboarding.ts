@@ -53,6 +53,21 @@ export const inboxSenderRelevanceSchema = z.object({
   }))
 })
 
+const senderClassificationLabelSchema = z.preprocess((value) => {
+  const normalized = String(value || "").trim().toLowerCase()
+  if (normalized === "yes") return "Yes"
+  if (normalized === "no") return "No"
+  if (normalized === "uncertain") return "Uncertain"
+  return value
+}, z.enum(["Yes", "No", "Uncertain"]))
+
+export const senderClassificationBatchSchema = z.object({
+  classifications: z.array(z.object({
+    candidate: z.coerce.number().int().min(1),
+    classification: senderClassificationLabelSchema
+  }))
+})
+
 const mappedNewsTopicSchema = z.object({
   normalized_topic: nonEmptyString,
   scope_summary: nonEmptyString,
@@ -78,4 +93,5 @@ export const topicMappingResultSchema = z.object({
 export type NewsTopicClarifier = z.infer<typeof newsTopicClarifierSchema>
 export type LessonTopicClarifier = z.infer<typeof lessonTopicClarifierSchema>
 export type InboxSenderRelevance = z.infer<typeof inboxSenderRelevanceSchema>
+export type SenderClassificationBatch = z.infer<typeof senderClassificationBatchSchema>
 export type TopicMappingResultSchema = z.infer<typeof topicMappingResultSchema>

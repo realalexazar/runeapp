@@ -1,7 +1,7 @@
 # Rune Rebuild Plan
 
-Last updated: 2026-05-24
-Version: 1.9
+Last updated: 2026-05-25
+Version: 1.10
 File: `docs/REBUILD_PLAN.md`
 
 This document is the source of truth for the Rune rebuild. It pins down the sequence, scope, exit criteria, and architectural direction so the team does not keep re-litigating the plan in chat.
@@ -529,7 +529,7 @@ Acceptance criteria:
 
 ## Immediate Next Tasks
 
-1. Continue migrating remaining legacy/direct LLM call sites through the Phase 0b gateway: onboarding chat signals, direct sender batch classification, and legacy preview/dev endpoints.
+1. Continue migrating remaining legacy/direct LLM call sites through the Phase 0b gateway: onboarding technical config, onboarding chat signals, and legacy preview/dev endpoints.
 2. Continue collecting real Phase 0a/0b baseline runs.
 3. Classify `app/api/digest/fetch-emails` and `app/api/backfill/start` as either dev-only routes to gate/remove or production routes to repoint to shared modules.
 4. Decide whether Google News RSS/web hydration metadata should keep raw public queries or move to hashed query labels in Phase 0b.
@@ -561,6 +561,7 @@ Acceptance criteria:
 
 | Version | Date | Changes |
 | --- | --- | --- |
+| 1.10 | 2026-05-25 | Migrated sender batch classification from direct OpenAI fetch and regex parsing onto the Phase 0b gateway with schema validation. |
 | 1.9 | 2026-05-25 | Migrated newsletter summaries, daily lesson synthesis, and current daily news synthesis onto schema validation; added daily-news prompt-size guardrails. |
 | 1.8 | 2026-05-25 | Migrated low-risk onboarding/config JSON call sites and inbox sender relevance onto the Phase 0b schema gateway. |
 | 1.7 | 2026-05-24 | Started Phase 0b gateway with schema validation, validation-failure capture, and first low-risk call-site migration. |

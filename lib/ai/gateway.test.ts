@@ -10,6 +10,7 @@ import {
   inboxSenderRelevanceSchema,
   lessonTopicClarifierSchema,
   newsTopicClarifierSchema,
+  senderClassificationBatchSchema,
   topicMappingResultSchema,
 } from "@/lib/ai/schemas/onboarding"
 
@@ -82,6 +83,22 @@ describe("onboarding LLM schemas", () => {
     })
 
     expect(parsed.senders[0].relevance_score).toBe(0.8)
+  })
+
+  it("normalizes sender classification labels", () => {
+    const parsed = senderClassificationBatchSchema.parse({
+      classifications: [
+        { candidate: "1", classification: "yes" },
+        { candidate: 2, classification: "Uncertain" },
+        { candidate: 3, classification: "NO" }
+      ]
+    })
+
+    expect(parsed.classifications.map((item) => item.classification)).toEqual([
+      "Yes",
+      "Uncertain",
+      "No"
+    ])
   })
 
   it("accepts nullable topic mapping branches", () => {
