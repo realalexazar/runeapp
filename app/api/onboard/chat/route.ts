@@ -2,7 +2,8 @@ import { NextResponse } from "next/server"
 import { getSupabaseServerClient } from "@/lib/supabase/server"
 import { supabaseServiceRole } from "@/lib/supabase/service"
 import { callClaude } from "@/lib/anthropic/chat"
-import { callOpenAIChatCompletion } from "@/lib/openai/chat"
+import { generateOpenAIObject } from "@/lib/ai/gateway"
+import { onboardTechnicalConfigSchema } from "@/lib/ai/schemas/onboarding"
 
 function normalizeInterests(interests: string[]): string[] {
   const result: string[] = []
@@ -201,25 +202,12 @@ function stripJsonBlock(text: string): string {
   return text.slice(0, openIdx).trim()
 }
 
-function extractJsonObject(text: string): any | null {
-  const trimmed = text.trim()
-  try { return JSON.parse(trimmed) } catch {}
-  const stripped = trimmed.replace(/^```(?:json)?\s*/i, "").replace(/\s*```\s*$/, "").trim()
-  try { return JSON.parse(stripped) } catch {}
-  const start = stripped.indexOf("{")
-  const end = stripped.lastIndexOf("}")
-  if (start >= 0 && end > start) {
-    try { return JSON.parse(stripped.slice(start, end + 1)) } catch {}
-  }
-  return null
-}
-
 async function generateTechnicalConfig(userId: string, intentData: Record<string, any>, scanSummary: any): Promise<Record<string, any> | null> {
   const OPENAI_API_KEY = process.env.OPENAI_API_KEY
   if (!OPENAI_API_KEY) return null
 
   try {
-    const resp = await callOpenAIChatCompletion({
+    const parsed = await generateOpenAIObject({
       apiKey: OPENAI_API_KEY,
       model: "gpt-4o",
       temperature: 0.15,
@@ -233,21 +221,17 @@ async function generateTechnicalConfig(userId: string, intentData: Record<string
           })
         }
       ],
+      schema: onboardTechnicalConfigSchema,
+      outputShapeName: "OnboardTechnicalConfig",
       telemetry: {
         userId,
         callSiteName: "onboard.chat.technical_config",
         filePath: "app/api/onboard/chat/route.ts",
-        functionName: "generateTechnicalConfig",
-        validationStatus: "regex",
-        outputShapeName: "OnboardTechnicalConfig"
+        functionName: "generateTechnicalConfig"
       }
     })
 
-    const data = await resp.json()
-    const parsed = extractJsonObject(data?.choices?.[0]?.message?.content || "")
-    if (parsed?.slot_allocation && Array.isArray(parsed.slot_allocation)) {
-      return parsed
-    }
+    return parsed
   } catch (e) {
     console.error("Technical config generation failed:", e)
   }

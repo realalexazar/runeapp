@@ -10,6 +10,7 @@ import {
   inboxSenderRelevanceSchema,
   lessonTopicClarifierSchema,
   newsTopicClarifierSchema,
+  onboardTechnicalConfigSchema,
   senderClassificationBatchSchema,
   topicMappingResultSchema,
 } from "@/lib/ai/schemas/onboarding"
@@ -99,6 +100,29 @@ describe("onboarding LLM schemas", () => {
       "Uncertain",
       "No"
     ])
+  })
+
+  it("accepts technical slot configs and normalizes slot types", () => {
+    const parsed = onboardTechnicalConfigSchema.parse({
+      slot_allocation: [{
+        slot: "1",
+        type: "NEWS",
+        focus: "AI regulation",
+        retrieval_queries: ["AI regulation enforcement"],
+        required_terms: [["AI", "artificial intelligence"], ["regulation"]],
+        scope_summary: "Daily updates on AI policy.",
+        rationale: "Matches the user's work."
+      }],
+      allocation_notes: "One focused news slot.",
+      inbox_curation_plan: {
+        priority_senders: [],
+        email_types_to_surface: [],
+        gap_note: ""
+      }
+    })
+
+    expect(parsed.slot_allocation[0].slot).toBe(1)
+    expect(parsed.slot_allocation[0].type).toBe("news")
   })
 
   it("accepts nullable topic mapping branches", () => {

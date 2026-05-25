@@ -68,6 +68,39 @@ export const senderClassificationBatchSchema = z.object({
   }))
 })
 
+const slotTypeSchema = z.preprocess(
+  (value) => String(value || "").trim().toLowerCase(),
+  z.enum(["email", "news", "lesson"])
+)
+
+const technicalConfigSlotSchema = z.object({
+  slot: z.coerce.number().int().min(1),
+  type: slotTypeSchema,
+  focus: nonEmptyString,
+  rationale: z.string().trim().optional(),
+  priority_senders: z.array(nonEmptyString).optional().default([]),
+  retrieval_queries: z.array(nonEmptyString).optional().default([]),
+  required_terms: z.array(z.array(nonEmptyString).min(1)).optional().default([]),
+  scope_summary: z.string().trim().optional(),
+  tracked_entities: z.array(nonEmptyString).optional().default([]),
+  starting_level: z.string().trim().optional(),
+  curriculum_goal: z.string().trim().optional()
+}).passthrough()
+
+export const onboardTechnicalConfigSchema = z.object({
+  slot_allocation: z.array(technicalConfigSlotSchema),
+  allocation_notes: z.string().trim().default(""),
+  inbox_curation_plan: z.object({
+    priority_senders: z.array(nonEmptyString).optional().default([]),
+    email_types_to_surface: z.array(nonEmptyString).optional().default([]),
+    gap_note: z.string().trim().default("")
+  }).passthrough().default({
+    priority_senders: [],
+    email_types_to_surface: [],
+    gap_note: ""
+  })
+}).passthrough()
+
 const mappedNewsTopicSchema = z.object({
   normalized_topic: nonEmptyString,
   scope_summary: nonEmptyString,
@@ -94,4 +127,5 @@ export type NewsTopicClarifier = z.infer<typeof newsTopicClarifierSchema>
 export type LessonTopicClarifier = z.infer<typeof lessonTopicClarifierSchema>
 export type InboxSenderRelevance = z.infer<typeof inboxSenderRelevanceSchema>
 export type SenderClassificationBatch = z.infer<typeof senderClassificationBatchSchema>
+export type OnboardTechnicalConfig = z.infer<typeof onboardTechnicalConfigSchema>
 export type TopicMappingResultSchema = z.infer<typeof topicMappingResultSchema>

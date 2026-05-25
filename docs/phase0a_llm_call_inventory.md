@@ -10,7 +10,7 @@ This is the static inventory for Phase 0a. It maps every production-relevant LLM
 - Migration: `supabase/migrations/20260522090000_phase0a_telemetry.sql`
 - Baseline query: `docs/phase0a_llm_cost_baseline.sql`
 - Shared telemetry helper: `lib/ai/llm-telemetry.ts`
-- Current validation posture: onboarding/config, inbox sender relevance, sender batch classification, newsletter summaries, lesson synthesis, and current daily news synthesis now use Phase 0b schema validation. Remaining regex paths are onboarding chat signals, onboarding technical config, and legacy preview/news paths.
+- Current validation posture: onboarding/config, inbox sender relevance, sender batch classification, newsletter summaries, lesson synthesis, and current daily news synthesis now use Phase 0b schema validation. Remaining regex paths are onboarding chat signals and legacy preview/news paths.
 
 ## Inventory
 
@@ -19,7 +19,7 @@ This is the static inventory for Phase 0a. It maps every production-relevant LLM
 | `onboard.chat.opening_message` | `app/api/onboard/chat/route.ts` / `POST` | Anthropic | `claude-sonnet-4-20250514` | First Rune chat message | `none` | `OnboardOpeningMessage` | yes |
 | `onboard.chat.conversation_turn` | `app/api/onboard/chat/route.ts` / `POST` | Anthropic | `claude-sonnet-4-20250514` | Main onboarding conversation and intent signal | `regex` | `OnboardIntentSignal` | yes |
 | `onboard.chat.recommendation_copy` | `app/api/onboard/chat/route.ts` / `POST` | Anthropic | `claude-sonnet-4-20250514` | User-facing recommendation copy | `regex` | `OnboardRecommendationSignal` | yes |
-| `onboard.chat.technical_config` | `app/api/onboard/chat/route.ts` / `generateTechnicalConfig` | OpenAI/OpenRouter | `gpt-4o` | Slot allocation and retrieval config | `regex` | `OnboardTechnicalConfig` | yes |
+| `onboard.chat.technical_config` | `app/api/onboard/chat/route.ts` / `generateTechnicalConfig` | OpenAI/OpenRouter | `gpt-4o` | Slot allocation and retrieval config | `schema` | `OnboardTechnicalConfig` | yes |
 | `onboard.scan_inbox.sender_relevance` | `app/api/onboard/scan-inbox/route.ts` / `POST` | OpenAI/OpenRouter | `gpt-4o-mini` | Score inbox senders against user intent | `schema` | `InboxSenderRelevance` | yes |
 | `onboard.classify_senders.batch` | `lib/onboard/llm-batch.ts` / `classifyBatchSingle` | OpenAI/OpenRouter | `gpt-4o-mini` | Batch newsletter vs. non-newsletter classification | `schema` | `SenderClassificationBatch` | yes |
 | `onboard.clarify_news_topic` | `app/api/onboard/clarify-news-topic/route.ts` / `POST` | OpenAI/OpenRouter | `gpt-4o-mini` | Legacy/dashboard news topic clarifier | `schema` | `NewsTopicClarifier` | yes |
