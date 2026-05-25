@@ -3,7 +3,9 @@ import { getSupabaseServerClient } from "@/lib/supabase/server"
 import { supabaseServiceRole } from "@/lib/supabase/service"
 import pLimit from "p-limit"
 import { convert } from "html-to-text"
-import { callOpenAIChatCompletion, isTransientNetworkError } from "@/lib/openai/chat"
+import { isTransientNetworkError } from "@/lib/openai/chat"
+import { generateOpenAIObject, LlmSchemaValidationError } from "@/lib/ai/gateway"
+import { newsletterSummaryMapSchema } from "@/lib/ai/schemas/digest"
 
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY
 const BATCH_SIZE = 12 // Conservative batch size (10-15 range)
@@ -498,14 +500,13 @@ The number of bullets should match the content—some stories need one bullet, o
 
 ${itemsText}`
 
-  // Call OpenAI
-  let responseText: string
+  let parsed: Record<string, string>
   try {
     if (!OPENAI_API_KEY) {
       throw new Error("OpenAI API key not configured")
     }
 
-    const response = await callOpenAIChatCompletion({
+    parsed = await generateOpenAIObject({
       apiKey: OPENAI_API_KEY,
       model,
       temperature: 0.7,
@@ -513,13 +514,13 @@ ${itemsText}`
         { role: "system", content: systemPrompt },
         { role: "user", content: userPrompt }
       ],
+      schema: newsletterSummaryMapSchema,
+      outputShapeName: "NewsletterSummaryArray",
       telemetry: {
         userId,
         callSiteName: "digest.dev_generate_summaries.batch",
         filePath: "app/api/digest/generate-summaries/route.ts",
         functionName: "summarizeBatchSingle",
-        validationStatus: "regex",
-        outputShapeName: "NewsletterSummaryArray",
         metadata: {
           batch_item_count: items.length,
           offset,
@@ -527,32 +528,16 @@ ${itemsText}`
         }
       }
     })
-
-    const data = await response.json()
-    responseText = data.choices[0]?.message?.content || "{}"
   } catch (e: any) {
+    if (e instanceof LlmSchemaValidationError) {
+      console.error("Failed to parse LLM response as JSON:", e.validationError)
+      return items.map(item => ({
+        item_id: item.id,
+        summary: `[Failed to parse summary: ${e.message}]`
+      }))
+    }
     console.error("OpenAI API call failed:", e)
     throw e
-  }
-
-  // Parse JSON response
-  let parsed: Record<string, string>
-  try {
-    // Try to extract JSON if wrapped in markdown
-    const jsonMatch = responseText.match(/\{[\s\S]*\}/)
-    if (jsonMatch) {
-      parsed = JSON.parse(jsonMatch[0])
-    } else {
-      parsed = JSON.parse(responseText)
-    }
-  } catch (parseErr: any) {
-    console.error("Failed to parse LLM response as JSON:", parseErr)
-    console.error("Raw response:", responseText)
-    // Fallback: return error summaries
-    return items.map(item => ({
-      item_id: item.id,
-      summary: `[Failed to parse summary: ${parseErr.message}]`
-    }))
   }
 
   // Map parsed results back to items

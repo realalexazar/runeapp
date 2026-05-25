@@ -7,8 +7,9 @@ import {
   setLessonState,
   upsertGeneratedContentItem
 } from "@/lib/digest/content-modules"
-import { callClaude } from "@/lib/anthropic/chat"
 import { callOpenAIChatCompletion } from "@/lib/openai/chat"
+import { generateClaudeObject, generateOpenAIObject, LlmSchemaValidationError } from "@/lib/ai/gateway"
+import { dailyLessonContentSchema, unifiedNewsBriefSchema, type UnifiedNewsBrief } from "@/lib/ai/schemas/digest"
 import {
   getExternalApiErrorMessage,
   getExternalApiStatusCode,
@@ -914,45 +915,40 @@ Tone:
     recent_lesson_titles: input.recentLessonTitles
   }
 
-  const raw = await callClaude({
-    system: prompt,
-    messages: [{ role: "user", content: JSON.stringify(userPayload) }],
-    temperature: 0.4,
-    maxTokens: 8192,
-    telemetry: {
-      userId: input.userId || null,
-      runId: input.runId || null,
-      slotId: input.slotId || input.topic.id,
-      callSiteName: "digest.lessons.synthesize_content",
-      filePath: "lib/digest/generator.ts",
-      functionName: "synthesizeLessonContent",
-      validationStatus: "regex",
+  try {
+    return await generateClaudeObject({
+      system: prompt,
+      messages: [{ role: "user", content: JSON.stringify(userPayload) }],
+      temperature: 0.4,
+      maxTokens: 8192,
+      schema: dailyLessonContentSchema,
       outputShapeName: "DailyLessonContent",
-      metadata: {
-        topic_id: input.topic.id,
-        current_day: input.currentDay,
-        day_count: input.dayCount
+      telemetry: {
+        userId: input.userId || null,
+        runId: input.runId || null,
+        slotId: input.slotId || input.topic.id,
+        callSiteName: "digest.lessons.synthesize_content",
+        filePath: "lib/digest/generator.ts",
+        functionName: "synthesizeLessonContent",
+        metadata: {
+          topic_id: input.topic.id,
+          current_day: input.currentDay,
+          day_count: input.dayCount
+        }
+      }
+    })
+  } catch (e) {
+    if (e instanceof LlmSchemaValidationError && e.rawOutput.length > 100) {
+      const cleaned = e.rawOutput
+        .replace(/^```(?:json)?\s*/i, "")
+        .replace(/\s*```\s*$/, "")
+        .trim()
+      return {
+        title: input.day.lesson_title,
+        content: cleaned
       }
     }
-  })
-  const parsed = extractJsonObject(raw)
-
-  if (parsed && parsed.content) {
-    return {
-      title: String(parsed.title || input.day.lesson_title),
-      content: String(parsed.content)
-    }
-  }
-
-  if (raw.length > 100) {
-    const cleaned = raw
-      .replace(/^```(?:json)?\s*/i, "")
-      .replace(/\s*```\s*$/, "")
-      .trim()
-    return {
-      title: input.day.lesson_title,
-      content: cleaned
-    }
+    throw e
   }
 
   return {
@@ -1132,52 +1128,65 @@ Synthesis rules:
 - Never output a separate "Why this matters" section, label, or trailing meta-paragraph. Any implication belongs inside the main content as concrete fact, not as a recap of what you already said.
 - References must point to the articles you actually used.`
 
-  const resp = await callOpenAIChatCompletion({
-    apiKey: OPENAI_API_KEY,
-    model: "gpt-4o",
-    temperature: 0.25,
-    messages: [
-      { role: "system", content: prompt },
-      {
-        role: "user",
-        content: JSON.stringify({
-          topic: input.topic.topic_text,
-          search_instruction: input.searchInstruction,
-          freshness_tier: input.tierKey,
-          framing_label: input.framingLabel,
-          candidates: input.candidates.map((article, index) => ({
-            index,
-            title: article.title,
-            source: article.source,
-            source_tier: getSourceTier(article.source || ""),
-            pubDate: article.pubDate,
-            url: article.resolvedUrl || article.link,
-            description: article.description,
-            content_preview: article.contentPreview || null,
-          }))
-        })
-      }
-    ],
-    telemetry: {
-      userId: input.userId || null,
-      runId: input.runId || null,
-      slotId: input.slotId || input.topic.id,
-      callSiteName: "digest.news.unified_filter_and_synthesize",
-      filePath: "lib/digest/generator.ts",
-      functionName: "unifiedFilterAndSynthesize",
-      validationStatus: "regex",
+  const candidatesForPrompt = input.candidates.slice(0, 12).map((article, index) => ({
+    index,
+    title: article.title,
+    source: article.source,
+    source_tier: getSourceTier(article.source || ""),
+    pubDate: article.pubDate,
+    url: article.resolvedUrl || article.link,
+    description: article.description,
+    content_preview: article.contentPreview ? article.contentPreview.slice(0, 5000) : null,
+  }))
+
+  let parsed: UnifiedNewsBrief
+  try {
+    parsed = await generateOpenAIObject({
+      apiKey: OPENAI_API_KEY,
+      model: "gpt-4o",
+      temperature: 0.25,
+      messages: [
+        { role: "system", content: prompt },
+        {
+          role: "user",
+          content: JSON.stringify({
+            topic: input.topic.topic_text,
+            search_instruction: input.searchInstruction,
+            freshness_tier: input.tierKey,
+            framing_label: input.framingLabel,
+            candidates: candidatesForPrompt
+          })
+        }
+      ],
+      schema: unifiedNewsBriefSchema,
       outputShapeName: "UnifiedNewsBrief",
-      metadata: {
-        candidate_count: input.candidates.length,
-        topic_id: input.topic.id,
-        tier_key: input.tierKey
+      telemetry: {
+        userId: input.userId || null,
+        runId: input.runId || null,
+        slotId: input.slotId || input.topic.id,
+        callSiteName: "digest.news.unified_filter_and_synthesize",
+        filePath: "lib/digest/generator.ts",
+        functionName: "unifiedFilterAndSynthesize",
+        metadata: {
+          candidate_count: input.candidates.length,
+          prompt_candidate_count: candidatesForPrompt.length,
+          max_content_preview_chars: 5000,
+          topic_id: input.topic.id,
+          tier_key: input.tierKey
+        }
+      }
+    })
+  } catch (e) {
+    if (e instanceof LlmSchemaValidationError) {
+      return {
+        title: input.topic.topic_text,
+        content: `No notable developments on ${input.topic.topic_text} today.`,
+        references: [],
+        articlesUsed: 0,
       }
     }
-  })
-
-  const data = await resp.json()
-  const raw = data?.choices?.[0]?.message?.content || ""
-  const parsed = extractJsonObject(raw)
+    throw e
+  }
 
   if (!parsed || (!parsed.content && (!parsed.relevant_indexes || parsed.relevant_indexes.length === 0))) {
     return {

@@ -1,5 +1,6 @@
 import { supabaseServiceRole } from "@/lib/supabase/service"
-import { callOpenAIChatCompletion } from "@/lib/openai/chat"
+import { generateOpenAIObject } from "@/lib/ai/gateway"
+import { newsletterSummaryMapSchema } from "@/lib/ai/schemas/digest"
 import { convert } from "html-to-text"
 
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY
@@ -137,35 +138,29 @@ For each item, start with "Headline: " then bullet points (•) with key facts. 
 Each key must be the exact item ID from BEGIN_ITEM markers. Example:
 { "${items[0]?.id}": "Headline: ...\\n• ...\\n• ..." }`
 
-  const resp = await callOpenAIChatCompletion({
-    apiKey: OPENAI_API_KEY!,
-    model: "gpt-4o",
-    temperature: 0.7,
-    messages: [
-      { role: "system", content: systemPrompt },
-      { role: "user", content: `Summarize:\n\n${itemsText}` },
-    ],
-    telemetry: {
-      userId,
-      callSiteName: "digest.newsletters.summarize_chunk",
-      filePath: "lib/digest/summarize-newsletters.ts",
-      functionName: "summarizeChunk",
-      validationStatus: "regex",
-      outputShapeName: "NewsletterSummaryMap",
-      metadata: {
-        batch_item_count: items.length,
-        style
-      }
-    }
-  })
-
-  const data = await resp.json()
-  const text = data.choices?.[0]?.message?.content || "{}"
-
   let parsed: Record<string, string>
   try {
-    const match = text.match(/\{[\s\S]*\}/)
-    parsed = match ? JSON.parse(match[0]) : JSON.parse(text)
+    parsed = await generateOpenAIObject({
+      apiKey: OPENAI_API_KEY!,
+      model: "gpt-4o",
+      temperature: 0.7,
+      messages: [
+        { role: "system", content: systemPrompt },
+        { role: "user", content: `Summarize:\n\n${itemsText}` },
+      ],
+      schema: newsletterSummaryMapSchema,
+      outputShapeName: "NewsletterSummaryMap",
+      telemetry: {
+        userId,
+        callSiteName: "digest.newsletters.summarize_chunk",
+        filePath: "lib/digest/summarize-newsletters.ts",
+        functionName: "summarizeChunk",
+        metadata: {
+          batch_item_count: items.length,
+          style
+        }
+      }
+    })
   } catch {
     return items.map(item => ({ item_id: item.id, summary: `[Summary generation failed]` }))
   }

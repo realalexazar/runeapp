@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest"
 import { extractJsonObject, redactLlmRawOutput } from "@/lib/ai/json"
+import {
+  dailyLessonContentSchema,
+  newsletterSummaryMapSchema,
+  unifiedNewsBriefSchema,
+} from "@/lib/ai/schemas/digest"
 import { lessonCurriculumSchema } from "@/lib/ai/schemas/lesson-curriculum"
 import {
   inboxSenderRelevanceSchema,
@@ -92,5 +97,35 @@ describe("onboarding LLM schemas", () => {
 
     expect(parsed.news?.required_terms?.[0]).toContain("AI")
     expect(parsed.lesson).toBeNull()
+  })
+})
+
+describe("digest LLM schemas", () => {
+  it("accepts dynamic newsletter summary maps", () => {
+    const parsed = newsletterSummaryMapSchema.parse({
+      "item-1": "Headline: Market update\n* A useful fact"
+    })
+
+    expect(parsed["item-1"]).toContain("Headline")
+  })
+
+  it("requires lesson title and content", () => {
+    expect(dailyLessonContentSchema.parse({
+      title: "Liquidity Transmission",
+      content: "A substantive lesson body."
+    }).title).toBe("Liquidity Transmission")
+  })
+
+  it("normalizes unified news brief numeric fields", () => {
+    const parsed = unifiedNewsBriefSchema.parse({
+      relevant_indexes: ["0", "2"],
+      title: "AI Regulation",
+      content: "Two relevant developments emerged.",
+      references: [{ title: "Story", url: "https://example.com", source: "Example" }],
+      articles_used: "2"
+    })
+
+    expect(parsed.relevant_indexes).toEqual([0, 2])
+    expect(parsed.articles_used).toBe(2)
   })
 })

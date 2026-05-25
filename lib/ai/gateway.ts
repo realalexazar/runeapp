@@ -1,5 +1,6 @@
 import { z } from "zod"
 import { callOpenAIChatCompletion } from "@/lib/openai/chat"
+import { callClaude } from "@/lib/anthropic/chat"
 import type { LlmTelemetryContext } from "@/lib/ai/llm-telemetry"
 import { extractJsonObject } from "@/lib/ai/json"
 import { recordLlmValidationFailure } from "@/lib/ai/llm-validation-failures"
@@ -60,6 +61,64 @@ export async function generateOpenAIObject<TSchema extends z.ZodTypeAny>(input: 
       ...input.telemetry,
       provider,
       model: input.model,
+      outputShapeName: input.outputShapeName,
+      rawOutput,
+      validationError,
+      metadata: {
+        ...(input.telemetry.metadata || {}),
+        gateway: "phase0b"
+      }
+    })
+
+    throw new LlmSchemaValidationError(
+      `LLM output failed schema validation for ${input.outputShapeName}`,
+      input.outputShapeName,
+      rawOutput,
+      validationError
+    )
+  }
+
+  return result.data
+}
+
+export async function generateClaudeObject<TSchema extends z.ZodTypeAny>(input: {
+  system: string
+  messages: Array<{ role: "user" | "assistant"; content: string }>
+  temperature?: number
+  maxTokens?: number
+  schema: TSchema
+  outputShapeName: string
+  telemetry: GatewayTelemetryContext
+}): Promise<z.infer<TSchema>> {
+  const model = "claude-sonnet-4-20250514"
+  const rawOutput = await callClaude({
+    system: input.system,
+    messages: input.messages,
+    temperature: input.temperature,
+    maxTokens: input.maxTokens,
+    telemetry: {
+      ...input.telemetry,
+      validationStatus: "schema",
+      outputShapeName: input.outputShapeName,
+      metadata: {
+        ...(input.telemetry.metadata || {}),
+        gateway: "phase0b"
+      }
+    }
+  })
+
+  const parsed = extractJsonObject(rawOutput)
+  const result = input.schema.safeParse(parsed)
+
+  if (!result.success) {
+    const validationError = parsed === null
+      ? { message: "No JSON object found in model output" }
+      : result.error.flatten()
+
+    await recordLlmValidationFailure({
+      ...input.telemetry,
+      provider: "anthropic",
+      model,
       outputShapeName: input.outputShapeName,
       rawOutput,
       validationError,
