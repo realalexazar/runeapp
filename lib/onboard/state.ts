@@ -403,6 +403,35 @@ export async function appendOnboardingMessage(
   if (error && !isStateStorageUnavailable(error)) throw error
 }
 
+export async function getOnboardingConversationHistory(
+  userId: string,
+  limit = 30
+): Promise<Array<{ role: "user" | "assistant"; content: string }>> {
+  const context = await getOrCreateOnboardingContext(userId)
+  if (!context.available) return []
+
+  const { data, error } = await supabaseServiceRole
+    .from("onboarding_messages")
+    .select("role, content, created_at")
+    .eq("onboarding_session_id", context.session.id)
+    .in("role", ["user", "rune"])
+    .order("created_at", { ascending: false })
+    .limit(limit)
+
+  if (error) {
+    if (isStateStorageUnavailable(error)) return []
+    throw error
+  }
+
+  return (data || [])
+    .reverse()
+    .map((message: any) => ({
+      role: (message.role === "rune" ? "assistant" : "user") as "user" | "assistant",
+      content: String(message.content || ""),
+    }))
+    .filter((message) => message.content.trim().length > 0)
+}
+
 export async function recordOnboardingEvent(
   userId: string,
   eventName: string,
@@ -937,6 +966,50 @@ export async function markOnboardingComplete(userId: string): Promise<void> {
       .update({ status: "active", updated_at: nowIso() })
       .eq("id", context.rune.id),
   ])
+}
+
+export async function markOnboardingFailed(
+  userId: string,
+  reason: string,
+  failure: { code: string; message: string; retryable: boolean },
+  metadata: Record<string, unknown> = {}
+): Promise<void> {
+  const context = await getOrCreateOnboardingContext(userId)
+  if (!context.available) return
+
+  const previousState = context.session.state
+  const timestamp = nowIso()
+  const { error: updateError } = await supabaseServiceRole
+    .from("onboarding_sessions")
+    .update({
+      state: "failed",
+      failure,
+      updated_at: timestamp,
+      completed_at: null,
+    })
+    .eq("id", context.session.id)
+
+  if (updateError && !isStateStorageUnavailable(updateError)) throw updateError
+
+  const { error: transitionError } = await supabaseServiceRole
+    .from("onboarding_state_transitions")
+    .insert({
+      user_id: userId,
+      rune_id: context.rune.id,
+      onboarding_session_id: context.session.id,
+      previous_state: previousState,
+      next_state: "failed",
+      reason,
+      metadata: { ...metadata, failure },
+    })
+
+  if (transitionError && !isStateStorageUnavailable(transitionError)) throw transitionError
+
+  await recordOnboardingEvent(userId, reason, {
+    ...metadata,
+    error_code: failure.code,
+    retryable: failure.retryable,
+  }, "server", previousState)
 }
 
 function cardStatus(validationErrors: string[]): CardStatus {

@@ -11,6 +11,7 @@ import {
 import {
   appendOnboardingMessage,
   buildOnboardingSnapshot,
+  getOnboardingConversationHistory,
   recordOnboardingEvent,
   updateIntentState,
 } from "@/lib/onboard/state"
@@ -301,19 +302,14 @@ export async function POST(req: Request) {
     }
 
     const userMessage = typeof body.message === "string" ? body.message.trim() : ""
-    const conversationHistory: Array<{ role: "user" | "assistant"; content: string }> =
-      Array.isArray(body.conversation_history) ? body.conversation_history : []
-
     if (!userMessage) {
       return NextResponse.json({ ok: false, error: "message is required" }, { status: 400 })
     }
 
     await appendOnboardingMessage(userId, "user", userMessage)
-
-    const messages: Array<{ role: "user" | "assistant"; content: string }> = [
-      ...conversationHistory.slice(-30),
-      { role: "user", content: userMessage }
-    ]
+    const persistedHistory = await getOnboardingConversationHistory(userId, 30)
+    const messages: Array<{ role: "user" | "assistant"; content: string }> =
+      persistedHistory.length > 0 ? persistedHistory : [{ role: "user", content: userMessage }]
 
     const serverPhase = await getOnboardChatPhase(userId)
     const useRecommendationPrompt = serverPhase === "recommendation"

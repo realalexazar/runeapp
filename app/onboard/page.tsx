@@ -658,7 +658,6 @@ function OnboardFlow() {
   const [conversationStarted, setConversationStarted] = useState(false)
   const [showSurge, setShowSurge] = useState(true)
 
-  const conversationHistory = useRef<Array<{ role: "user" | "assistant"; content: string }>>([])
   const scrollRef = useRef<HTMLDivElement>(null)
   const inputRef = useRef<HTMLTextAreaElement>(null)
   const initDone = useRef(false)
@@ -674,7 +673,6 @@ function OnboardFlow() {
 
   const addRuneMessage = useCallback((content: string) => {
     setMessages((prev) => [...prev, { id: uid(), role: "rune", content, timestamp: Date.now() }])
-    conversationHistory.current.push({ role: "assistant", content })
     scrollToBottom()
   }, [scrollToBottom])
 
@@ -690,10 +688,6 @@ function OnboardFlow() {
         timestamp: Date.parse(message.created_at) || Date.now(),
       }))
       setMessages(restored)
-      conversationHistory.current = restored.map((message) => ({
-        role: message.role === "rune" ? "assistant" : "user",
-        content: message.content,
-      }))
       setConversationStarted(true)
       setShowGreetingPrompt(false)
       setShowSurge(false)
@@ -714,6 +708,15 @@ function OnboardFlow() {
       setPhase("recommendation")
     }
   }, [])
+
+  const applySnapshotOrAppendRuneMessage = useCallback((snapshot: OnboardingSnapshot | undefined, runeMessage: string) => {
+    if (snapshot?.conversation?.messages?.length) {
+      applyServerSnapshot(snapshot)
+    } else {
+      if (snapshot) setServerSnapshot(snapshot)
+      addRuneMessage(runeMessage)
+    }
+  }, [addRuneMessage, applyServerSnapshot])
 
   const hydrateServerState = useCallback(async () => {
     try {
@@ -737,22 +740,7 @@ function OnboardFlow() {
 
     const stepParam = searchParams.get("step")
     if (stepParam === "scanning") {
-      hydrateServerState().then((snapshot) => {
-        if (!snapshot?.conversation?.messages?.length) {
-          try {
-            const saved = sessionStorage.getItem("rune_onboard_messages")
-            if (saved) {
-              const restored = JSON.parse(saved) as ChatMessage[]
-              setMessages(restored)
-              for (const m of restored) {
-                conversationHistory.current.push({
-                  role: m.role === "rune" ? "assistant" : "user",
-                  content: m.content
-                })
-              }
-            }
-          } catch {}
-        }
+      hydrateServerState().then(() => {
         setConversationStarted(true)
         setShowSurge(false)
         setPhase("scanning")
@@ -787,8 +775,7 @@ function OnboardFlow() {
       const data = await res.json()
       setTyping(false)
       if (data.ok && data.rune_message) {
-        if (data.snapshot) setServerSnapshot(data.snapshot)
-        addRuneMessage(data.rune_message)
+        applySnapshotOrAppendRuneMessage(data.snapshot, data.rune_message)
         setTimeout(() => {
           scrollRef.current?.scrollTo({ top: 0, behavior: "auto" })
         }, 50)
@@ -814,7 +801,6 @@ function OnboardFlow() {
     setInput("")
     if (inputRef.current) inputRef.current.style.height = "auto"
     setMessages((prev) => [...prev, { id: uid(), role: "user", content: msg, timestamp: Date.now() }])
-    conversationHistory.current.push({ role: "user", content: msg })
     scrollToBottom()
 
     setLoading(true)
@@ -835,9 +821,10 @@ function OnboardFlow() {
         const data = await res.json().catch(() => null)
         setTyping(false)
 
-        if (data?.snapshot) applyServerSnapshot(data.snapshot)
         if (data?.rune_message) {
-          addRuneMessage(data.rune_message)
+          applySnapshotOrAppendRuneMessage(data.snapshot, data.rune_message)
+        } else if (data?.snapshot) {
+          applyServerSnapshot(data.snapshot)
         } else if (!res.ok) {
           addRuneMessage(data?.error?.message || "I couldn't apply that change. Try saying it another way.")
         }
@@ -847,10 +834,7 @@ function OnboardFlow() {
       const res = await fetch("/api/onboard/chat", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          message: msg,
-          conversation_history: conversationHistory.current.slice(0, -1)
-        })
+        body: JSON.stringify({ message: msg })
       })
       if (res.status === 401) { router.push("/auth?redirectedFrom=/onboard"); return }
       const data = await res.json()
@@ -861,8 +845,7 @@ function OnboardFlow() {
         return
       }
 
-      addRuneMessage(data.rune_message)
-      if (data.snapshot) setServerSnapshot(data.snapshot)
+      applySnapshotOrAppendRuneMessage(data.snapshot, data.rune_message)
 
       if (data.signal === "intent_ready") {
         const intent = data.intent_data || {}
@@ -871,14 +854,6 @@ function OnboardFlow() {
           setTimeout(() => injectScanResults(null), 500)
         } else {
           await persistInboxPreference("wanted")
-          try {
-            sessionStorage.setItem("rune_onboard_messages", JSON.stringify([
-              ...messages,
-              { id: uid(), role: "user", content: msg, timestamp: Date.now() },
-              { id: uid(), role: "rune", content: data.rune_message, timestamp: Date.now() }
-            ]))
-            sessionStorage.setItem("rune_onboard_intent", JSON.stringify(intent))
-          } catch {}
           setTimeout(() => {
             setPhase("gmail_connect")
             scrollToBottom()
@@ -957,7 +932,6 @@ function OnboardFlow() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           message: systemMessage,
-          conversation_history: conversationHistory.current,
           scan_results: scanSummary || null,
         })
       })
@@ -965,8 +939,7 @@ function OnboardFlow() {
       setTyping(false)
 
       if (data.ok) {
-        if (data.snapshot) setServerSnapshot(data.snapshot)
-        addRuneMessage(data.rune_message)
+        applySnapshotOrAppendRuneMessage(data.snapshot, data.rune_message)
 
         if (data.signal === "recommendation_ready") {
           handleRecommendationSignal(data.recommendation_data)
@@ -1009,7 +982,7 @@ function OnboardFlow() {
         body: JSON.stringify({ preference_status: status })
       })
       const data = await res.json().catch(() => null)
-      if (data?.snapshot) setServerSnapshot(data.snapshot)
+      if (data?.snapshot) applyServerSnapshot(data.snapshot)
     } catch {}
   }
 
@@ -1053,13 +1026,12 @@ function OnboardFlow() {
         body: JSON.stringify({ config })
       })
       const data = await res.json()
+      if (data.snapshot) applyServerSnapshot(data.snapshot)
 
       if (data.ok) {
-        if (data.snapshot) applyServerSnapshot(data.snapshot)
         setPhase("approved")
-        try { sessionStorage.removeItem("rune_onboard_messages"); sessionStorage.removeItem("rune_onboard_intent") } catch {}
       } else {
-        addRuneMessage("Something went wrong saving your config. Try again.")
+        addRuneMessage(data.error || "Something went wrong saving your config. Try again.")
       }
     } catch {
       addRuneMessage("Connection issue during setup. Try the button again.")

@@ -2,7 +2,13 @@ import { NextResponse } from "next/server"
 import { getSupabaseServerClient } from "@/lib/supabase/server"
 import { supabaseServiceRole } from "@/lib/supabase/service"
 import { generateCurriculumPlan } from "@/lib/onboard/generate-curriculum"
-import { buildOnboardingSnapshot, markOnboardingApproved, markOnboardingComplete } from "@/lib/onboard/state"
+import {
+  buildOnboardingSnapshot,
+  markOnboardingApproved,
+  markOnboardingComplete,
+  markOnboardingFailed,
+  recordOnboardingEvent,
+} from "@/lib/onboard/state"
 
 const ALLOWED_LEVELS = ["beginner", "intermediate", "advanced"] as const
 
@@ -28,9 +34,14 @@ export async function POST(req: Request) {
     const { config } = body
 
     if (!config || !Array.isArray(config.slot_allocation)) {
+      await recordOnboardingEvent(user.id, "approval_failed", {
+        error_code: "invalid_config",
+        retryable: true,
+      })
       return NextResponse.json({
         ok: false,
-        error: "Invalid config: missing slot_allocation array"
+        error: "Invalid config: missing slot_allocation array",
+        snapshot: await buildOnboardingSnapshot(user.id),
       }, { status: 400 })
     }
 
@@ -53,7 +64,17 @@ export async function POST(req: Request) {
     }
     if (slotErrors.length > 0) {
       console.error("Slot validation failed:", slotErrors)
-      return NextResponse.json({ ok: false, error: "Invalid news slot config", details: slotErrors }, { status: 400 })
+      await recordOnboardingEvent(user.id, "approval_failed", {
+        error_code: "invalid_news_slot_config",
+        retryable: true,
+        details: slotErrors,
+      })
+      return NextResponse.json({
+        ok: false,
+        error: "Invalid news slot config",
+        details: slotErrors,
+        snapshot: await buildOnboardingSnapshot(user.id),
+      }, { status: 400 })
     }
 
     const curriculumPlans =
@@ -139,8 +160,6 @@ export async function POST(req: Request) {
       createdIds.newsletter_selections_count = combined.length
     }
 
-    await markOnboardingApproved(user.id)
-
     const { data: rpcData, error: rpcError } = await supabaseServiceRole.rpc("commit_onboard_approval", {
       p_user_id: user.id,
       p_now: now,
@@ -154,12 +173,22 @@ export async function POST(req: Request) {
 
     if (rpcError) {
       console.error("commit_onboard_approval failed:", rpcError)
+      await markOnboardingFailed(user.id, "approval_failed", {
+        code: "commit_onboard_approval_failed",
+        message: rpcError.message || "Database transaction failed",
+        retryable: true,
+      })
       return NextResponse.json(
-        { ok: false, error: rpcError.message || "Database transaction failed" },
+        {
+          ok: false,
+          error: rpcError.message || "Database transaction failed",
+          snapshot: await buildOnboardingSnapshot(user.id),
+        },
         { status: 500 }
       )
     }
 
+    await markOnboardingApproved(user.id)
     await markOnboardingComplete(user.id)
 
     const result = rpcData as {
@@ -190,6 +219,15 @@ export async function POST(req: Request) {
     })
   } catch (e: any) {
     console.error("Error approving onboarding config:", e)
-    return NextResponse.json({ ok: false, error: String(e.message || e) }, { status: 500 })
+    await markOnboardingFailed(user.id, "approval_failed", {
+      code: "approval_exception",
+      message: String(e.message || e),
+      retryable: true,
+    }).catch(() => undefined)
+    return NextResponse.json({
+      ok: false,
+      error: String(e.message || e),
+      snapshot: await buildOnboardingSnapshot(user.id).catch(() => undefined),
+    }, { status: 500 })
   }
 }

@@ -1,7 +1,7 @@
 # Onboarding Spec
 
 Last updated: 2026-05-26
-Spec version: 1.2
+Spec version: 1.3
 Status: approved for Phase 0c implementation
 File: `docs/ONBOARDING_SPEC.md`
 
@@ -23,7 +23,7 @@ The structural rule is:
 Frontend renders server state. Server owns onboarding truth.
 ```
 
-No critical onboarding state should depend on `sessionStorage`.
+No critical onboarding state should depend on `sessionStorage`. Chat prompt context should be reconstructed from persisted server messages, not from a client-supplied transcript.
 
 ## Product Principles
 
