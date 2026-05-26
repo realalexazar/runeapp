@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest"
 import { extractJsonObject, redactLlmRawOutput } from "@/lib/ai/json"
 import {
   dailyLessonContentSchema,
+  newsRelevanceEvaluationsSchema,
   newsletterSummaryMapSchema,
   unifiedNewsBriefSchema,
 } from "@/lib/ai/schemas/digest"
@@ -10,6 +11,9 @@ import {
   inboxSenderRelevanceSchema,
   lessonTopicClarifierSchema,
   newsTopicClarifierSchema,
+  onboardConversationTurnSchema,
+  onboardOpeningMessageSchema,
+  onboardRecommendationTurnSchema,
   onboardTechnicalConfigSchema,
   senderClassificationBatchSchema,
   topicMappingResultSchema,
@@ -125,6 +129,46 @@ describe("onboarding LLM schemas", () => {
     expect(parsed.slot_allocation[0].type).toBe("news")
   })
 
+  it("accepts structured onboarding chat turns", () => {
+    expect(onboardOpeningMessageSchema.parse({
+      rune_message: "Hey, I'm ready."
+    }).rune_message).toContain("ready")
+
+    const conversation = onboardConversationTurnSchema.parse({
+      rune_message: "I can build that for you.",
+      intent: {
+        intent_ready: true,
+        professional_context: "The user works in real estate finance.",
+        inferred_expertise_level: "Senior",
+        occupation_interests: ["commercial real estate", "rates"],
+        free_interest: "Florida politics",
+        learning_topic: {
+          topic: "monetary policy",
+          starting_level: "intermediate",
+          goal: "Understand transmission mechanisms"
+        },
+        inbox_preferences: {
+          wants_inbox_curation: true,
+          email_types_wanted: ["market newsletters"],
+          notes: "Prioritize substantive updates."
+        }
+      }
+    })
+
+    expect(conversation.intent?.inferred_expertise_level).toBe("senior")
+    expect(conversation.intent?.free_interest).toBe("Florida politics")
+
+    const recommendation = onboardRecommendationTurnSchema.parse({
+      rune_message: "Here's what I'd build.",
+      recommendation: {
+        recommendation_ready: true,
+        user_facing_summary: ["Daily CRE market signal"]
+      }
+    })
+
+    expect(recommendation.recommendation?.user_facing_summary).toHaveLength(1)
+  })
+
   it("accepts nullable topic mapping branches", () => {
     const parsed = topicMappingResultSchema.parse({
       news: {
@@ -168,5 +212,22 @@ describe("digest LLM schemas", () => {
 
     expect(parsed.relevant_indexes).toEqual([0, 2])
     expect(parsed.articles_used).toBe(2)
+  })
+
+  it("normalizes news relevance evaluations", () => {
+    const parsed = newsRelevanceEvaluationsSchema.parse({
+      evaluations: [{
+        index: "1",
+        relevant: "true",
+        confidence: "0.72",
+        reason: "Substantive match."
+      }]
+    })
+
+    expect(parsed.evaluations[0]).toMatchObject({
+      index: 1,
+      relevant: true,
+      confidence: 0.72
+    })
   })
 })

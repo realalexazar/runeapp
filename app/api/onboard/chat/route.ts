@@ -1,9 +1,13 @@
 import { NextResponse } from "next/server"
 import { getSupabaseServerClient } from "@/lib/supabase/server"
 import { supabaseServiceRole } from "@/lib/supabase/service"
-import { callClaude } from "@/lib/anthropic/chat"
-import { generateOpenAIObject } from "@/lib/ai/gateway"
-import { onboardTechnicalConfigSchema } from "@/lib/ai/schemas/onboarding"
+import { generateClaudeObject, generateOpenAIObject } from "@/lib/ai/gateway"
+import {
+  onboardConversationTurnSchema,
+  onboardOpeningMessageSchema,
+  onboardRecommendationTurnSchema,
+  onboardTechnicalConfigSchema,
+} from "@/lib/ai/schemas/onboarding"
 
 function normalizeInterests(interests: string[]): string[] {
   const result: string[] = []
@@ -114,6 +118,52 @@ Never say: modules, features, slots, allocation, pipeline, configuration. Never 
 
 If the user requests changes, adjust your description and emit a new recommendation_ready JSON.`
 
+const ONBOARDING_OPENING_JSON_PROMPT = `${CONVERSATION_PROMPT}
+
+## Output contract override
+For this opening-message request, return STRICT JSON only. No markdown, no prose outside JSON:
+{
+  "rune_message": "the exact user-visible chat message"
+}`
+
+const CONVERSATION_JSON_PROMPT = `${CONVERSATION_PROMPT}
+
+## Output contract override
+Ignore the earlier instruction to append a fenced JSON block. Return STRICT JSON only. No markdown, no prose outside JSON:
+{
+  "rune_message": "the exact user-visible chat message",
+  "intent": null
+}
+
+When you have enough information, set "intent" to:
+{
+  "intent_ready": true,
+  "professional_context": "1-2 sentence summary",
+  "inferred_expertise_level": "junior | mid | senior",
+  "occupation_interests": ["topic 1", "topic 2"],
+  "free_interest": "topic or null",
+  "learning_topic": { "topic": "string or null", "starting_level": "string or null", "goal": "string or null" },
+  "inbox_preferences": { "wants_inbox_curation": true, "email_types_wanted": ["type1"], "notes": "specifics" }
+}
+
+Set "intent" to null until the intent is ready. The user only sees rune_message, so never refer to JSON or internal fields inside rune_message.`
+
+const RECOMMENDATION_JSON_PROMPT = `${RECOMMENDATION_CONVERSATIONAL_PROMPT}
+
+## Output contract override
+Ignore the earlier instruction to append a fenced JSON block. Return STRICT JSON only. No markdown, no prose outside JSON:
+{
+  "rune_message": "the exact user-visible recommendation message",
+  "recommendation": {
+    "recommendation_ready": true,
+    "user_facing_summary": [
+      "Plain language description of each thing they're getting"
+    ]
+  }
+}
+
+The user only sees rune_message, so never refer to JSON or internal fields inside rune_message.`
+
 const TECHNICAL_CONFIG_PROMPT = `You generate search configurations for a daily news digest system. Given a user's structured intent and optional inbox scan data, produce a precise slot allocation.
 
 Each slot is one of three types:
@@ -154,53 +204,6 @@ Return STRICT JSON only. No prose, no markdown, no explanation:
     "gap_note": "gaps between what user wanted and what inbox contained"
   }
 }`
-
-function extractSignal(text: string): { type: "intent" | "recommendation" | null; data: Record<string, any> | null } {
-  const completeMatch = text.match(/```(?:json)?\s*(\{[\s\S]*\})\s*```\s*$/)
-  if (completeMatch) {
-    try {
-      const parsed = JSON.parse(completeMatch[1])
-      if (parsed?.intent_ready === true) return { type: "intent", data: parsed }
-      if (parsed?.recommendation_ready === true) return { type: "recommendation", data: parsed }
-    } catch {}
-  }
-
-  const truncatedMatch = text.match(/```(?:json)?\s*(\{[\s\S]*)$/)
-  if (truncatedMatch) {
-    const jsonStr = truncatedMatch[1].trim()
-    let depth = 0
-    let lastValidEnd = -1
-    for (let i = 0; i < jsonStr.length; i++) {
-      if (jsonStr[i] === "{") depth++
-      if (jsonStr[i] === "}") {
-        depth--
-        if (depth === 0) { lastValidEnd = i; break }
-      }
-    }
-    if (lastValidEnd > 0) {
-      try {
-        const parsed = JSON.parse(jsonStr.slice(0, lastValidEnd + 1))
-        if (parsed?.intent_ready === true) return { type: "intent", data: parsed }
-        if (parsed?.recommendation_ready === true) return { type: "recommendation", data: parsed }
-      } catch {}
-    }
-  }
-
-  return { type: null, data: null }
-}
-
-function stripJsonBlock(text: string): string {
-  const stripped = text.replace(/```(?:json)?\s*\{[\s\S]*\}\s*```\s*$/, "").trim()
-  if (stripped !== text.trim()) return stripped
-
-  const openIdx = text.indexOf("```json")
-  if (openIdx === -1) {
-    const altIdx = text.indexOf("```\n{")
-    if (altIdx !== -1) return text.slice(0, altIdx).trim()
-    return text.trim()
-  }
-  return text.slice(0, openIdx).trim()
-}
 
 async function generateTechnicalConfig(userId: string, intentData: Record<string, any>, scanSummary: any): Promise<Record<string, any> | null> {
   const OPENAI_API_KEY = process.env.OPENAI_API_KEY
@@ -262,25 +265,25 @@ export async function POST(req: Request) {
       ]
       const vibe = vibes[Math.floor(Math.random() * vibes.length)]
 
-      const rawResponse = await callClaude({
-        system: CONVERSATION_PROMPT,
+      const response = await generateClaudeObject({
+        system: ONBOARDING_OPENING_JSON_PROMPT,
         messages: [
           { role: "user", content: `[SYSTEM: Generate your opening message to a new user. No prior context. ${vibe}]` }
         ],
         temperature: 1.0,
+        schema: onboardOpeningMessageSchema,
+        outputShapeName: "OnboardOpeningMessage",
         telemetry: {
           userId,
           callSiteName: "onboard.chat.opening_message",
           filePath: "app/api/onboard/chat/route.ts",
-          functionName: "POST",
-          validationStatus: "none",
-          outputShapeName: "OnboardOpeningMessage"
+          functionName: "POST"
         }
       })
 
       return NextResponse.json({
         ok: true,
-        rune_message: stripJsonBlock(rawResponse),
+        rune_message: response.rune_message,
         signal: null,
         onboard_chat_phase: onboardChatPhase,
       })
@@ -301,38 +304,52 @@ export async function POST(req: Request) {
 
     const serverPhase = await getOnboardChatPhase(userId)
     const useRecommendationPrompt = serverPhase === "recommendation"
-    const systemPrompt = useRecommendationPrompt
-      ? RECOMMENDATION_CONVERSATIONAL_PROMPT
-      : CONVERSATION_PROMPT
-
-    const rawResponse = await callClaude({
-      system: systemPrompt,
-      messages,
-      temperature: 0.7,
-      telemetry: {
-        userId,
-        callSiteName: useRecommendationPrompt
-          ? "onboard.chat.recommendation_copy"
-          : "onboard.chat.conversation_turn",
-        filePath: "app/api/onboard/chat/route.ts",
-        functionName: "POST",
-        validationStatus: "regex",
-        outputShapeName: useRecommendationPrompt
-          ? "OnboardRecommendationSignal"
-          : "OnboardIntentSignal",
-        metadata: {
-          onboard_chat_phase: serverPhase
-        }
+    const baseTelemetry = {
+      userId,
+      callSiteName: useRecommendationPrompt
+        ? "onboard.chat.recommendation_copy"
+        : "onboard.chat.conversation_turn",
+      filePath: "app/api/onboard/chat/route.ts",
+      functionName: "POST",
+      metadata: {
+        onboard_chat_phase: serverPhase
       }
-    })
+    }
 
-    const { type: signalType, data: signalData } = extractSignal(rawResponse)
-    const userFacingMessage = stripJsonBlock(rawResponse)
+    let signalType: "intent" | "recommendation" | null = null
+    let signalData: Record<string, any> | null = null
+    let userFacingMessage: string
+
+    if (useRecommendationPrompt) {
+      const turn = await generateClaudeObject({
+        system: RECOMMENDATION_JSON_PROMPT,
+        messages,
+        temperature: 0.7,
+        schema: onboardRecommendationTurnSchema,
+        outputShapeName: "OnboardRecommendationTurn",
+        telemetry: baseTelemetry
+      })
+      userFacingMessage = turn.rune_message
+      signalType = turn.recommendation ? "recommendation" : null
+      signalData = turn.recommendation
+    } else {
+      const turn = await generateClaudeObject({
+        system: CONVERSATION_JSON_PROMPT,
+        messages,
+        temperature: 0.7,
+        schema: onboardConversationTurnSchema,
+        outputShapeName: "OnboardConversationTurn",
+        telemetry: baseTelemetry
+      })
+      userFacingMessage = turn.rune_message
+      signalType = turn.intent ? "intent" : null
+      signalData = turn.intent
+    }
 
     if (signalType === "intent") {
       const rawInterestsFromIntent = [
-        ...(signalData!.occupation_interests || []),
-        ...(signalData!.free_interest ? [signalData!.free_interest] : [])
+        ...(signalData?.occupation_interests || []),
+        ...(signalData?.free_interest ? [signalData.free_interest] : [])
       ]
       const interests = normalizeInterests(rawInterestsFromIntent)
 
@@ -340,10 +357,10 @@ export async function POST(req: Request) {
         .from("user_profiles")
         .upsert({
           user_id: userId,
-          professional_context: signalData!.professional_context || "",
+          professional_context: signalData?.professional_context || "",
           stay_on_top_of: interests,
-          get_sharper_on: signalData!.learning_topic?.topic
-            ? [signalData!.learning_topic.topic]
+          get_sharper_on: signalData?.learning_topic?.topic
+            ? [signalData.learning_topic.topic]
             : [],
           recommended_config: { raw_intent: signalData },
           onboarding_status: "conversation_done",
@@ -360,7 +377,7 @@ export async function POST(req: Request) {
       })
     }
 
-    if (signalType === "recommendation") {
+    if (signalType === "recommendation" && signalData) {
       const { data: profile } = await supabaseServiceRole
         .from("user_profiles")
         .select("recommended_config, stay_on_top_of")

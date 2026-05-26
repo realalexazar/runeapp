@@ -1,7 +1,7 @@
 # Rune Rebuild Plan
 
-Last updated: 2026-05-25
-Version: 1.11
+Last updated: 2026-05-26
+Version: 1.12
 File: `docs/REBUILD_PLAN.md`
 
 This document is the source of truth for the Rune rebuild. It pins down the sequence, scope, exit criteria, and architectural direction so the team does not keep re-litigating the plan in chat.
@@ -529,11 +529,11 @@ Acceptance criteria:
 
 ## Immediate Next Tasks
 
-1. Continue migrating remaining legacy/direct LLM call sites through the Phase 0b gateway: onboarding chat signals and legacy preview/dev endpoints.
-2. Continue collecting real Phase 0a/0b baseline runs.
-3. Classify `app/api/digest/fetch-emails` and `app/api/backfill/start` as either dev-only routes to gate/remove or production routes to repoint to shared modules.
-4. Decide whether Google News RSS/web hydration metadata should keep raw public queries or move to hashed query labels in Phase 0b.
-5. Draft the Phase 0a Exit Memo after the 5-day/3-user baseline is met or explicitly waived.
+1. Monitor Phase 0b validation failures and cost deltas for the newly migrated onboarding chat and preview relevance call sites.
+2. Draft the Phase 0b Exit Memo after the post-migration telemetry window is reviewed or explicitly waived.
+3. Classify `app/api/digest/fetch-emails` and `app/api/backfill/start` as either dev-only routes to gate/remove or production routes to repoint to shared modules during Phase 0c.
+4. Decide whether Google News RSS/web hydration metadata should keep raw public queries or move to hashed query labels in Phase 0c.
+5. Start Phase 0c only after human owner sign-off on the onboarding/product spine direction.
 
 ## Decision Log
 
@@ -561,6 +561,7 @@ Acceptance criteria:
 
 | Version | Date | Changes |
 | --- | --- | --- |
+| 1.12 | 2026-05-26 | Completed Phase 0b code migration for production-relevant LLM call sites: onboarding chat turns now return schema-validated structured messages, preview news relevance uses schema validation, and dead legacy news synthesis was removed. |
 | 1.11 | 2026-05-25 | Migrated onboarding technical config generation onto the Phase 0b gateway with a schema-validated slot allocation contract. |
 | 1.10 | 2026-05-25 | Migrated sender batch classification from direct OpenAI fetch and regex parsing onto the Phase 0b gateway with schema validation. |
 | 1.9 | 2026-05-25 | Migrated newsletter summaries, daily lesson synthesis, and current daily news synthesis onto schema validation; added daily-news prompt-size guardrails. |

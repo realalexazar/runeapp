@@ -1,6 +1,6 @@
 # Cleanup Ledger
 
-Last updated: 2026-05-25
+Last updated: 2026-05-26
 
 This ledger tracks stale migrations, antiquated code paths, and outdated product messages discovered during Phase 0a. Cleanup should be deliberate: classify first, remove only after the canonical path and rollback story are clear.
 
@@ -22,7 +22,7 @@ This ledger tracks stale migrations, antiquated code paths, and outdated product
 | Old onboarding cards | `components/OnboardingFlow.tsx`, `components/StyleSelectionCard.tsx`, `NewsletterSelectionCard`, related routes | Existing docs already mark pieces deprecated | Legacy/dev | Quarantine behind dev route or delete after Phase 0c canonical onboarding exists |
 | Legacy clarifiers | `/api/onboard/clarify-news-topic`, `/api/onboard/clarify-lesson-topic`, `/api/onboard/generate-lesson-curriculum` | Used by `StyleSelectionCard`, not main `/onboard` chat | Legacy/dev | Keep measured in Phase 0a; remove when dashboard onboarding is removed |
 | Duplicate summarization | `lib/digest/summarize-newsletters.ts` and `app/api/digest/generate-summaries/route.ts` | Cron and dev route have different prompts/parsing | Duplicate logic | Make `lib/digest/summarize-newsletters.ts` canonical; convert dev route to call shared module |
-| News generation dead weight | `_synthesizeNewsBrief` in `lib/digest/generator.ts` | `rg` shows no production callers | Quarantined | Removed unused `fetchNewsArticles`/timeframe helper and marked the legacy synthesis path as unused pending full deletion |
+| News generation dead weight | `_synthesizeNewsBrief` in `lib/digest/generator.ts` | `rg` showed no production callers | Cleaned | Removed the unused legacy synthesis path; current production news uses `unifiedFilterAndSynthesize` |
 | LLM batch bypass | `lib/onboard/llm-batch.ts` directly fetched OpenAI | It bypassed retry/OpenRouter wrapper | Cleaned | Routed through the Phase 0b LLM gateway with `SenderClassificationBatch` schema validation |
 | Anthropic fallback model | `lib/anthropic/chat.ts` fallback now uses `claude-haiku-4-5` | Previous exact fallback ID looked stale; Anthropic's Haiku page says to use `claude-haiku-4-5` | Cleaned in Phase 0a | Reconfirm during Phase 0b gateway migration |
 | Console noise | Client onboarding components and digest retrieval emitted dev-era `console.log` noise | Build lint warnings and noisy prod/dev logs | Cleaned | Removed redundant logs where telemetry or UI state already covers the signal |

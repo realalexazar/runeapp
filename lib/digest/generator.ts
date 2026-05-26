@@ -7,9 +7,13 @@ import {
   setLessonState,
   upsertGeneratedContentItem
 } from "@/lib/digest/content-modules"
-import { callOpenAIChatCompletion } from "@/lib/openai/chat"
 import { generateClaudeObject, generateOpenAIObject, LlmSchemaValidationError } from "@/lib/ai/gateway"
-import { dailyLessonContentSchema, unifiedNewsBriefSchema, type UnifiedNewsBrief } from "@/lib/ai/schemas/digest"
+import {
+  dailyLessonContentSchema,
+  newsRelevanceEvaluationsSchema,
+  unifiedNewsBriefSchema,
+  type UnifiedNewsBrief
+} from "@/lib/ai/schemas/digest"
 import {
   getExternalApiErrorMessage,
   getExternalApiStatusCode,
@@ -89,30 +93,6 @@ type CurriculumDay = {
   lesson_title: string
   objective: string
   key_points: string[]
-}
-
-function extractJsonObject(text: string): any | null {
-  const trimmed = text.trim()
-  try {
-    return JSON.parse(trimmed)
-  } catch {}
-
-  const stripped = trimmed
-    .replace(/^```(?:json)?\s*/i, "")
-    .replace(/\s*```\s*$/, "")
-    .trim()
-  try {
-    return JSON.parse(stripped)
-  } catch {}
-
-  const start = stripped.indexOf("{")
-  const end = stripped.lastIndexOf("}")
-  if (start >= 0 && end > start) {
-    try {
-      return JSON.parse(stripped.slice(start, end + 1))
-    } catch {}
-  }
-  return null
 }
 
 function formatDateKey(date: Date) {
@@ -690,53 +670,52 @@ Return STRICT JSON:
 Confidence should be between 0 and 1.
 Keep reasons short.`
 
-  const resp = await callOpenAIChatCompletion({
-    apiKey: OPENAI_API_KEY,
-    model: "gpt-4o",
-    temperature: 0.1,
-    messages: [
-      { role: "system", content: prompt },
-      {
-        role: "user",
-        content: JSON.stringify({
-          topic: input.topic.topic_text,
-          search_instruction: input.searchInstruction,
-          candidates: input.articles.map((article, index) => ({
-            index,
-            title: article.title,
-            description: article.description,
-            content_preview: article.contentPreview || null,
-            source: article.source,
-            pubDate: article.pubDate
-          }))
-        })
-      }
-    ],
-    telemetry: {
-      userId: input.userId || null,
-      runId: input.runId || null,
-      slotId: input.slotId || null,
-      callSiteName: "digest.news.relevance_filter",
-      filePath: "lib/digest/generator.ts",
-      functionName: "filterRelevantNewsArticles",
-      validationStatus: "regex",
+  let evaluations: NewsRelevanceEvaluation[]
+  try {
+    const parsed = await generateOpenAIObject({
+      apiKey: OPENAI_API_KEY,
+      model: "gpt-4o",
+      temperature: 0.1,
+      messages: [
+        { role: "system", content: prompt },
+        {
+          role: "user",
+          content: JSON.stringify({
+            topic: input.topic.topic_text,
+            search_instruction: input.searchInstruction,
+            candidates: input.articles.map((article, index) => ({
+              index,
+              title: article.title,
+              description: article.description,
+              content_preview: article.contentPreview || null,
+              source: article.source,
+              pubDate: article.pubDate
+            }))
+          })
+        }
+      ],
+      schema: newsRelevanceEvaluationsSchema,
       outputShapeName: "NewsRelevanceEvaluations",
-      metadata: {
-        candidate_count: input.articles.length,
-        topic_id: input.topic.id
+      telemetry: {
+        userId: input.userId || null,
+        runId: input.runId || null,
+        slotId: input.slotId || null,
+        callSiteName: "digest.news.relevance_filter",
+        filePath: "lib/digest/generator.ts",
+        functionName: "filterRelevantNewsArticles",
+        metadata: {
+          candidate_count: input.articles.length,
+          topic_id: input.topic.id
+        }
       }
+    })
+    evaluations = parsed.evaluations
+  } catch (e) {
+    if (e instanceof LlmSchemaValidationError) {
+      return fallbackRelevantNewsArticles(input)
     }
-  })
-
-  const data = await resp.json()
-  const parsed = extractJsonObject(data?.choices?.[0]?.message?.content || "")
-  const rawEvaluations = Array.isArray(parsed?.evaluations) ? parsed.evaluations : []
-  const evaluations: NewsRelevanceEvaluation[] = rawEvaluations.map((evaluation: any) => ({
-    index: Number(evaluation?.index || 0),
-    relevant: !!evaluation?.relevant,
-    confidence: Math.max(0, Math.min(1, Number(evaluation?.confidence ?? 0))),
-    reason: String(evaluation?.reason || "")
-  }))
+    throw e
+  }
 
   const relevantIndexes = new Set(
     evaluations
@@ -947,107 +926,6 @@ Tone:
   return {
     title: input.day.lesson_title,
     content: input.day.key_points.map((kp: string) => `• ${kp}`).join("\n\n")
-  }
-}
-
-async function _synthesizeNewsBrief(input: {
-  userId?: string | null
-  runId?: string | null
-  slotId?: string | null
-  topic: NewsTopicRecord
-  searchInstruction: string
-  articles: NewsArticle[]
-  framingLabel: string
-  tierKey: NewsFreshnessTier["key"]
-}) {
-  if (!OPENAI_API_KEY) {
-    return {
-      title: input.topic.topic_text,
-      content: `${input.framingLabel}: ${input.articles.slice(0, 3).map((article) => `${article.title} (${article.source || "Source"})`).join("; ")}`,
-      references: input.articles.slice(0, 5).map((article) => ({
-        title: article.title,
-        url: article.link,
-        source: article.source || "Source"
-      })),
-      whyThisMatters: null
-    }
-  }
-
-  const articleCount = input.articles.length
-
-  const prompt = `You are Rune's daily news writer.
-You receive a scoped search instruction and retrieved news items for a specific freshness window.
-Write one substantive intelligence brief with references.
-Return STRICT JSON:
-{
-  "title": "string",
-  "content": "string",
-  "references": [
-    { "title": "string", "url": "string", "source": "string" }
-  ]
-}
-
-Requirements:
-- Be specific: name the companies, the numbers, the actual news. No vague summaries.
-- Put any implication or "why care" in the main "content" — do NOT add a separate "why this matters" section or paragraph; do not end with meta-padding.
-- If the retrieved articles cover different subtopics, present each as a separate brief item — do not force them into one unified narrative. A brief with three distinct items is better than one paragraph pretending three unrelated stories are connected.
-- ${articleCount === 1 ? "You have ONE source. Do not synthesize. Present it directly: 'One notable development: [specific thing]. [Source].' Two sentences max." : articleCount <= 2 ? "You have very few sources. Write 2-3 sentences max. Be short and honest. Do NOT pad thin material." : "Keep content concise and digestible."}
-- Respect the freshness framing. If the window is broader than today, write it as a concise status update over that period.
-- Use only the provided retrieved items.
-- References must point to the most relevant items.`
-
-  const resp = await callOpenAIChatCompletion({
-    apiKey: OPENAI_API_KEY,
-    model: "gpt-4o",
-    temperature: 0.3,
-    messages: [
-      { role: "system", content: prompt },
-      {
-        role: "user",
-        content: JSON.stringify({
-          search_instruction: input.searchInstruction,
-          topic: input.topic.topic_text,
-          freshness_tier: input.tierKey,
-          framing_label: input.framingLabel,
-        articles: input.articles.slice(0, 8).map((article) => ({
-          title: article.title,
-          source: article.source,
-          pubDate: article.pubDate,
-          url: article.resolvedUrl || article.link,
-          description: article.description,
-          content_preview: article.contentPreview || null
-        }))
-        })
-      }
-    ],
-    telemetry: {
-      userId: input.userId || null,
-      runId: input.runId || null,
-      slotId: input.slotId || input.topic.id,
-      callSiteName: "digest.news.synthesize_brief_legacy",
-      filePath: "lib/digest/generator.ts",
-      functionName: "_synthesizeNewsBrief",
-      validationStatus: "regex",
-      outputShapeName: "NewsBrief",
-      metadata: {
-        candidate_count: input.articles.length,
-        topic_id: input.topic.id,
-        legacy_path: true
-      }
-    }
-  })
-
-  const data = await resp.json()
-  const parsed = extractJsonObject(data?.choices?.[0]?.message?.content || "")
-  if (!parsed) {
-    throw new Error("Invalid news brief JSON")
-  }
-
-  return {
-    title: String(parsed.title || input.topic.topic_text),
-    content: stripWhyThisMattersArtifacts(String(parsed.content || "")),
-    references: Array.isArray(parsed.references) ? parsed.references : [],
-    whyThisMatters: null as null
   }
 }
 

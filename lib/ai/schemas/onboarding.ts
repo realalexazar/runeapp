@@ -101,6 +101,59 @@ export const onboardTechnicalConfigSchema = z.object({
   })
 }).passthrough()
 
+const expertiseLevelSchema = z.preprocess(
+  (value) => String(value || "").trim().toLowerCase(),
+  z.enum(["junior", "mid", "senior"])
+)
+
+const nullableTrimmedString = z.preprocess((value) => {
+  if (value === null || value === undefined) return null
+  const trimmed = String(value).trim()
+  if (!trimmed || trimmed.toLowerCase() === "null") return null
+  return trimmed
+}, z.string().min(1).nullable())
+
+export const onboardIntentSignalSchema = z.object({
+  intent_ready: z.literal(true),
+  professional_context: nonEmptyString,
+  inferred_expertise_level: expertiseLevelSchema,
+  occupation_interests: z.array(nonEmptyString).default([]),
+  free_interest: nullableTrimmedString.default(null),
+  learning_topic: z.object({
+    topic: nullableTrimmedString.default(null),
+    starting_level: nullableTrimmedString.default(null),
+    goal: nullableTrimmedString.default(null)
+  }).default({
+    topic: null,
+    starting_level: null,
+    goal: null
+  }),
+  inbox_preferences: z.object({
+    wants_inbox_curation: z.coerce.boolean(),
+    email_types_wanted: z.array(nonEmptyString).default([]),
+    notes: z.string().trim().default("")
+  })
+})
+
+export const onboardConversationTurnSchema = z.object({
+  rune_message: nonEmptyString,
+  intent: onboardIntentSignalSchema.nullable().default(null)
+})
+
+export const onboardRecommendationSignalSchema = z.object({
+  recommendation_ready: z.literal(true),
+  user_facing_summary: z.array(nonEmptyString).default([])
+})
+
+export const onboardRecommendationTurnSchema = z.object({
+  rune_message: nonEmptyString,
+  recommendation: onboardRecommendationSignalSchema.nullable().default(null)
+})
+
+export const onboardOpeningMessageSchema = z.object({
+  rune_message: nonEmptyString
+})
+
 const mappedNewsTopicSchema = z.object({
   normalized_topic: nonEmptyString,
   scope_summary: nonEmptyString,
@@ -128,4 +181,6 @@ export type LessonTopicClarifier = z.infer<typeof lessonTopicClarifierSchema>
 export type InboxSenderRelevance = z.infer<typeof inboxSenderRelevanceSchema>
 export type SenderClassificationBatch = z.infer<typeof senderClassificationBatchSchema>
 export type OnboardTechnicalConfig = z.infer<typeof onboardTechnicalConfigSchema>
+export type OnboardIntentSignal = z.infer<typeof onboardIntentSignalSchema>
+export type OnboardRecommendationSignal = z.infer<typeof onboardRecommendationSignalSchema>
 export type TopicMappingResultSchema = z.infer<typeof topicMappingResultSchema>

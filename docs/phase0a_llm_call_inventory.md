@@ -1,6 +1,6 @@
 # Phase 0a LLM Call Inventory
 
-Last updated: 2026-05-25
+Last updated: 2026-05-26
 
 This is the static inventory for Phase 0a. It maps every production-relevant LLM call site found in `app/` and `lib/`, the output contract currently expected, and whether runtime telemetry is wired.
 
@@ -10,15 +10,15 @@ This is the static inventory for Phase 0a. It maps every production-relevant LLM
 - Migration: `supabase/migrations/20260522090000_phase0a_telemetry.sql`
 - Baseline query: `docs/phase0a_llm_cost_baseline.sql`
 - Shared telemetry helper: `lib/ai/llm-telemetry.ts`
-- Current validation posture: onboarding/config, inbox sender relevance, sender batch classification, newsletter summaries, lesson synthesis, and current daily news synthesis now use Phase 0b schema validation. Remaining regex paths are onboarding chat signals and legacy preview/news paths.
+- Current validation posture: all production-relevant LLM call sites in `app/` and `lib/` now use Phase 0b schema validation through the gateway. The only direct provider wrappers left are `lib/ai/gateway.ts`, `lib/openai/chat.ts`, and `lib/anthropic/chat.ts`.
 
 ## Inventory
 
 | Call site | File / function | Provider | Model | Purpose | Validation | Output shape | Telemetry |
 | --- | --- | --- | --- | --- | --- | --- | --- |
-| `onboard.chat.opening_message` | `app/api/onboard/chat/route.ts` / `POST` | Anthropic | `claude-sonnet-4-20250514` | First Rune chat message | `none` | `OnboardOpeningMessage` | yes |
-| `onboard.chat.conversation_turn` | `app/api/onboard/chat/route.ts` / `POST` | Anthropic | `claude-sonnet-4-20250514` | Main onboarding conversation and intent signal | `regex` | `OnboardIntentSignal` | yes |
-| `onboard.chat.recommendation_copy` | `app/api/onboard/chat/route.ts` / `POST` | Anthropic | `claude-sonnet-4-20250514` | User-facing recommendation copy | `regex` | `OnboardRecommendationSignal` | yes |
+| `onboard.chat.opening_message` | `app/api/onboard/chat/route.ts` / `POST` | Anthropic | `claude-sonnet-4-20250514` | First Rune chat message | `schema` | `OnboardOpeningMessage` | yes |
+| `onboard.chat.conversation_turn` | `app/api/onboard/chat/route.ts` / `POST` | Anthropic | `claude-sonnet-4-20250514` | Main onboarding conversation and intent signal | `schema` | `OnboardConversationTurn` | yes |
+| `onboard.chat.recommendation_copy` | `app/api/onboard/chat/route.ts` / `POST` | Anthropic | `claude-sonnet-4-20250514` | User-facing recommendation copy | `schema` | `OnboardRecommendationTurn` | yes |
 | `onboard.chat.technical_config` | `app/api/onboard/chat/route.ts` / `generateTechnicalConfig` | OpenAI/OpenRouter | `gpt-4o` | Slot allocation and retrieval config | `schema` | `OnboardTechnicalConfig` | yes |
 | `onboard.scan_inbox.sender_relevance` | `app/api/onboard/scan-inbox/route.ts` / `POST` | OpenAI/OpenRouter | `gpt-4o-mini` | Score inbox senders against user intent | `schema` | `InboxSenderRelevance` | yes |
 | `onboard.classify_senders.batch` | `lib/onboard/llm-batch.ts` / `classifyBatchSingle` | OpenAI/OpenRouter | `gpt-4o-mini` | Batch newsletter vs. non-newsletter classification | `schema` | `SenderClassificationBatch` | yes |
@@ -29,8 +29,7 @@ This is the static inventory for Phase 0a. It maps every production-relevant LLM
 | `digest.config.topic_mapping` | `app/api/digest/config/route.ts` / `mapTopicsWithLLM` | OpenAI/OpenRouter | `gpt-4o-mini` | Legacy/dashboard topic mapping into digest config | `schema` | `TopicMappingResult` | yes |
 | `digest.newsletters.summarize_chunk` | `lib/digest/summarize-newsletters.ts` / `summarizeChunk` | OpenAI/OpenRouter | `gpt-4o` | Cron newsletter batch summaries | `schema` | `NewsletterSummaryMap` | yes |
 | `digest.dev_generate_summaries.batch` | `app/api/digest/generate-summaries/route.ts` / `summarizeBatchSingle` | OpenAI/OpenRouter | `gpt-4o-mini` or `gpt-4o` | Dev/dashboard batch summaries | `schema` | `NewsletterSummaryArray` | yes |
-| `digest.news.relevance_filter` | `lib/digest/generator.ts` / `filterRelevantNewsArticles` | OpenAI/OpenRouter | `gpt-4o` | Legacy/preview news relevance filter | `regex` | `NewsRelevanceEvaluations` | yes |
-| `digest.news.synthesize_brief_legacy` | `lib/digest/generator.ts` / `synthesizeNewsBrief` | OpenAI/OpenRouter | `gpt-4o` | Legacy news synthesis path | `regex` | `NewsBrief` | yes |
+| `digest.news.relevance_filter` | `lib/digest/generator.ts` / `filterRelevantNewsArticles` | OpenAI/OpenRouter | `gpt-4o` | Preview news relevance filter | `schema` | `NewsRelevanceEvaluations` | yes |
 | `digest.news.unified_filter_and_synthesize` | `lib/digest/generator.ts` / `unifiedFilterAndSynthesize` | OpenAI/OpenRouter | `gpt-4o` | Current daily news filter + synthesis path | `schema` | `UnifiedNewsBrief` | yes |
 | `digest.lessons.synthesize_content` | `lib/digest/generator.ts` / `synthesizeLessonContent` | Anthropic | `claude-sonnet-4-20250514` | Current daily lesson content generation | `schema` | `DailyLessonContent` | yes |
 
@@ -53,7 +52,7 @@ Sources checked on 2026-05-22:
 
 ## Follow-Up For Phase 0b
 
-- Replace `regex` extraction with named Zod schemas.
+- Phase 0b code migration is complete for production-relevant LLM call sites; continue monitoring validation failures and cost deltas.
 - Raw-output capture for schema validation failures is now available in `public.llm_validation_failures` with 30-day retention metadata.
 - `lib/onboard/llm-batch.ts` now uses the Phase 0b gateway and `SenderClassificationBatch` schema; monitor validation failures during real inbox scans.
 - Use `docs/phase0a_external_api_inventory.md` for non-LLM API call tracking; Tavily runtime telemetry is wired, Gmail remains static inventory.
