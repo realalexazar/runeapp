@@ -26,6 +26,23 @@ export async function PATCH(req: Request, context: RouteContext) {
     const { cardId } = await context.params
     const body = await req.json().catch(() => ({}))
     const fields = body.fields && typeof body.fields === "object" ? body.fields : body
+    const clientVersion = Number(body.current_config_version || 0)
+
+    if (clientVersion && clientVersion !== before.recommendation?.config_version) {
+      return NextResponse.json(await makeMutationResponse(user.id, previousState, {
+        code: "stale_recommendation",
+        retryable: true,
+        message: "I refreshed the latest version. Try that edit again.",
+      }), { status: 409 })
+    }
+
+    if (body.recommendation_version_id && body.recommendation_version_id !== before.recommendation?.version_id) {
+      return NextResponse.json(await makeMutationResponse(user.id, previousState, {
+        code: "stale_recommendation",
+        retryable: true,
+        message: "I refreshed the latest version. Try that edit again.",
+      }), { status: 409 })
+    }
 
     const result = await applyRecommendationCardEdit(user.id, cardId, fields)
     if (!result.ok) {

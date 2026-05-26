@@ -544,10 +544,9 @@ Acceptance criteria:
 1. Human owner reviews `docs/phase-exits/phase0a_exit_memo.md` and `docs/phase-exits/phase0b_exit_memo.md`, then either signs off, requests production telemetry, or records explicit waivers.
 2. Populate active alpha user count and average scheduled Rune runs/day from production Supabase, or record an alpha-volume waiver.
 3. Monitor Phase 0b validation failures and cost deltas for the newly migrated onboarding chat and preview relevance call sites.
-4. Apply `supabase/migrations/20260526120000_onboarding_state_machine.sql` to production before relying on the new state tables as the canonical path.
-5. Finish Phase 0c frontend card editing and natural-language refinement against `docs/ONBOARDING_SPEC.md` v1.1.
-6. Decide whether `app/api/digest/fetch-emails` and `app/api/backfill/start` should be removed or repointed to shared modules after their production gate has soaked.
-7. Decide whether Google News RSS/web hydration metadata should keep raw public queries or move to hashed query labels in Phase 0c.
+4. Smoke-test the production onboarding path now that `supabase/migrations/20260526120000_onboarding_state_machine.sql` is applied.
+5. Decide whether `app/api/digest/fetch-emails` and `app/api/backfill/start` should be removed or repointed to shared modules after their production gate has soaked.
+6. Decide whether Google News RSS/web hydration metadata should keep raw public queries or move to hashed query labels in Phase 0c.
 
 ## Decision Log
 
@@ -579,6 +578,7 @@ The plan is changing quickly because the rebuild is active. Going forward, group
 
 | Version | Date | Changes |
 | --- | --- | --- |
+| 1.17 | 2026-05-26 | Continued Phase 0c after production migration: added editable server-backed recommendation cards, stale-version checks for direct edits, and `/api/onboard/refine` for schema-validated natural-language refinement patches. |
 | 1.16 | 2026-05-26 | Started Phase 0c implementation: added onboarding state-machine migration, server snapshot/state helpers, state/build/inbox/card APIs, snapshot hydration in `/onboard`, scan/recommend/approve state hooks, Gmail connect telemetry hooks, and production gating for dev Gmail routes. |
 | 1.15 | 2026-05-26 | Added phase statuses, populated current alpha state from the controlled Phase 0a snapshot, added Phase 0a/0b exit memo follow-through, clarified the remaining real-traffic cost baseline question, and added document-maintenance guidance. |
 | 1.14 | 2026-05-26 | Tightened `docs/ONBOARDING_SPEC.md` to v1.1 with card status rules, recommendation versioning, conversation summary generation, mutation response contracts, refinement gate validation, telemetry debounce, abandonment semantics, and accessibility/initial-state notes. |

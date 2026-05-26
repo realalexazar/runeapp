@@ -734,7 +734,7 @@ Suggested Phase 0c API surfaces:
 | `POST /api/onboard/build` | User-triggered Build my Rune action and minimum gate check |
 | `POST /api/onboard/inbox-preference` | Persist wanted/not wanted/skipped |
 | `POST /api/onboard/scan-inbox` | Start or resume scan |
-| `POST /api/onboard/recommendation` | Generate or regenerate typed cards |
+| `POST /api/onboard/recommend` | Persist generated typed cards from the current recommendation turn |
 | `PATCH /api/onboard/cards/:cardId` | Direct card edit |
 | `POST /api/onboard/refine` | Natural-language card/config patch |
 | `POST /api/onboard/approve` | Commit validated config |

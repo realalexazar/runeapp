@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useRef, useCallback, Suspense, useMemo } from "react"
 import { useSearchParams, useRouter } from "next/navigation"
-import { ArrowUp, Loader2, Check, ChevronDown, ChevronUp, Mail, BookOpen, Newspaper } from "lucide-react"
+import { ArrowUp, Loader2, Check, ChevronDown, ChevronUp, Mail, BookOpen, Newspaper, Save } from "lucide-react"
 
 type ChatMessage = {
   id: string
@@ -35,15 +35,26 @@ type RecommendationData = {
   user_facing_summary?: string[]
 }
 
+type OnboardingCard = Record<string, any> & {
+  id: string
+  type: "news" | "lesson" | "inbox" | "delivery"
+  title: string
+  status?: "draft" | "valid" | "invalid" | "pending_patch"
+  validation_errors?: string[]
+}
+
 type OnboardingSnapshot = {
+  rune_id?: string
+  onboarding_session_id?: string
   state: string
   state_storage_available?: boolean
   conversation?: {
     messages?: Array<{ id?: string; role: "user" | "rune"; content: string; created_at: string }>
   }
   recommendation?: {
+    version_id?: string
     config_version: number
-    cards: Array<Record<string, any>>
+    cards: OnboardingCard[]
     user_facing_summary: string[]
     raw_recommendation?: any
   }
@@ -54,11 +65,8 @@ function uid() {
 }
 
 function recommendationFromSnapshot(snapshot: OnboardingSnapshot): RecommendationData | null {
-  const raw = snapshot.recommendation?.raw_recommendation
-  if (raw?.slot_allocation) return raw as RecommendationData
-
   const cards = snapshot.recommendation?.cards || []
-  if (cards.length === 0) return null
+  const raw = snapshot.recommendation?.raw_recommendation
 
   const slotAllocation: SlotAllocation[] = []
   for (const card of cards) {
@@ -96,11 +104,43 @@ function recommendationFromSnapshot(snapshot: OnboardingSnapshot): Recommendatio
     }
   }
 
+  if (slotAllocation.length === 0 && raw?.slot_allocation) return raw as RecommendationData
+  if (slotAllocation.length === 0) return null
+
   return {
     slot_allocation: slotAllocation,
     user_facing_summary: snapshot.recommendation?.user_facing_summary || [],
+    inbox_curation_plan: raw?.inbox_curation_plan || null,
+    allocation_notes: raw?.allocation_notes || null,
   }
 }
+
+function listToText(value: unknown): string {
+  return Array.isArray(value) ? value.map(String).filter(Boolean).join(", ") : ""
+}
+
+function textToList(value: string): string[] {
+  return value
+    .split(/[,\n]/)
+    .map((item) => item.trim())
+    .filter(Boolean)
+}
+
+function senderListToText(value: unknown): string {
+  if (!Array.isArray(value)) return ""
+  return value
+    .map((sender: any) => sender?.address || sender?.name || sender)
+    .map(String)
+    .filter(Boolean)
+    .join(", ")
+}
+
+function textToSenderList(value: string): Array<{ address: string }> {
+  return textToList(value).map((address) => ({ address }))
+}
+
+const INPUT_CLASS = "w-full rounded-lg border border-white/[0.08] bg-black/20 px-3 py-2 text-[13px] text-white/80 outline-none transition placeholder:text-white/20 focus:border-white/[0.18] focus:bg-black/30"
+const LABEL_CLASS = "mb-1.5 block text-[11px] font-medium uppercase tracking-[0.08em] text-white/35"
 
 function TypingIndicator() {
   return (
@@ -248,18 +288,24 @@ function GreetingScreen({ greeting, showPrompt }: { greeting: string; showPrompt
 
 function RecommendationCard({
   data,
+  cards,
+  onSaveCard,
   onApprove,
   approving,
 }: {
   data: RecommendationData
+  cards: OnboardingCard[]
+  onSaveCard: (cardId: string, fields: Record<string, unknown>) => Promise<void>
   onApprove: () => void
   approving: boolean
 }) {
   const [showDetails, setShowDetails] = useState(false)
+  const hasEditableCards = cards.length > 0
+  const hasInvalidCards = cards.some((card) => card.status === "invalid")
 
   return (
-    <div className="animate-in fade-in slide-in-from-bottom-2 duration-500 mt-2">
-      <div className="rounded-2xl border border-white/[0.08] bg-white/[0.03] p-5 backdrop-blur-sm">
+    <div className="animate-in fade-in slide-in-from-bottom-2 duration-500 mt-2 space-y-4">
+      <div className="space-y-4">
         {data.user_facing_summary && data.user_facing_summary.length > 0 && (
           <div className="mb-4 space-y-2">
             {data.user_facing_summary.map((line, i) => (
@@ -271,54 +317,64 @@ function RecommendationCard({
           </div>
         )}
 
-        <button
-          onClick={() => setShowDetails(!showDetails)}
-          className="mb-3 flex items-center gap-1 text-[12px] text-white/30 hover:text-white/50 transition-colors"
-        >
-          {showDetails ? <ChevronUp className="h-3 w-3" /> : <ChevronDown className="h-3 w-3" />}
-          {showDetails ? "Hide details" : "Show details"}
-        </button>
-
-        {showDetails && (
+        {hasEditableCards ? (
           <div className="mb-4 space-y-3">
-            {data.slot_allocation.map((slot) => (
-              <div key={slot.slot} className="rounded-lg bg-white/[0.03] px-3 py-2.5 ring-1 ring-white/[0.05]">
-                <div className="flex items-center gap-2 mb-1">
-                  {SLOT_ICONS[slot.type] || null}
-                  <span className="text-[11px] font-semibold uppercase tracking-[0.08em] text-white/40">
-                    {SLOT_LABELS[slot.type] || slot.type}
-                  </span>
-                </div>
-                <p className="text-[13px] font-medium text-white/70">{slot.focus}</p>
-                {slot.rationale && (
-                  <p className="mt-1 text-[12px] text-white/30">{slot.rationale}</p>
-                )}
-                {slot.scope_summary && (
-                  <p className="mt-1 text-[12px] text-white/30 leading-relaxed">{slot.scope_summary}</p>
-                )}
-                {slot.curriculum_goal && (
-                  <p className="mt-1 text-[12px] text-white/30">{slot.curriculum_goal}</p>
+            {cards.map((card) => (
+              <EditableSetupCard
+                key={`${card.id}-${card.updated_at || ""}`}
+                card={card}
+                onSave={onSaveCard}
+              />
+            ))}
+          </div>
+        ) : (
+          <>
+            <button
+              onClick={() => setShowDetails(!showDetails)}
+              className="mb-3 flex items-center gap-1 text-[12px] text-white/30 hover:text-white/50 transition-colors"
+            >
+              {showDetails ? <ChevronUp className="h-3 w-3" /> : <ChevronDown className="h-3 w-3" />}
+              {showDetails ? "Hide details" : "Show details"}
+            </button>
+
+            {showDetails && (
+              <div className="mb-4 space-y-3">
+                {data.slot_allocation.map((slot) => (
+                  <div key={slot.slot} className="rounded-lg bg-white/[0.03] px-3 py-2.5 ring-1 ring-white/[0.05]">
+                    <div className="flex items-center gap-2 mb-1">
+                      {SLOT_ICONS[slot.type] || null}
+                      <span className="text-[11px] font-semibold uppercase tracking-[0.08em] text-white/40">
+                        {SLOT_LABELS[slot.type] || slot.type}
+                      </span>
+                    </div>
+                    <p className="text-[13px] font-medium text-white/70">{slot.focus}</p>
+                    {slot.rationale && (
+                      <p className="mt-1 text-[12px] text-white/30">{slot.rationale}</p>
+                    )}
+                    {slot.scope_summary && (
+                      <p className="mt-1 text-[12px] text-white/30 leading-relaxed">{slot.scope_summary}</p>
+                    )}
+                    {slot.curriculum_goal && (
+                      <p className="mt-1 text-[12px] text-white/30">{slot.curriculum_goal}</p>
+                    )}
+                  </div>
+                ))}
+
+                {data.inbox_curation_plan?.gap_note && (
+                  <p className="text-[12px] text-amber-400/60 px-1">{data.inbox_curation_plan.gap_note}</p>
                 )}
               </div>
-            ))}
-
-            {data.inbox_curation_plan?.gap_note && (
-              <p className="text-[12px] text-amber-400/60 px-1">{data.inbox_curation_plan.gap_note}</p>
             )}
-          </div>
+          </>
         )}
 
         <div className="mb-4 rounded-lg bg-blue-500/[0.06] px-3 py-2 ring-1 ring-blue-400/10">
           <p className="text-[12px] text-blue-300/60">First delivery arrives tomorrow at 7:00 AM</p>
         </div>
 
-        <p className="mb-3 text-[12px] text-white/30 text-center">
-          Adjust anything by typing below, or lock it in.
-        </p>
-
         <button
           onClick={onApprove}
-          disabled={approving}
+          disabled={approving || hasInvalidCards}
           className="w-full rounded-xl bg-white py-3 text-[14px] font-semibold text-[#07070d] transition-all hover:bg-white/90 active:scale-[0.98] disabled:opacity-50"
         >
           {approving ? (
@@ -329,9 +385,260 @@ function RecommendationCard({
             "Looks good"
           )}
         </button>
+        {hasInvalidCards && (
+          <p className="mt-2 text-center text-[12px] text-amber-300/60">
+            Fix the highlighted cards before approval.
+          </p>
+        )}
       </div>
     </div>
   )
+}
+
+function EditableSetupCard({
+  card,
+  onSave,
+}: {
+  card: OnboardingCard
+  onSave: (cardId: string, fields: Record<string, unknown>) => Promise<void>
+}) {
+  const [draft, setDraft] = useState<Record<string, any>>(() => card)
+  const [dirty, setDirty] = useState(false)
+  const [saving, setSaving] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+
+  function updateField(field: string, value: unknown) {
+    setDraft((current) => ({ ...current, [field]: value }))
+    setDirty(true)
+  }
+
+  async function save() {
+    if (!dirty || saving) return
+    setSaving(true)
+    setError(null)
+    try {
+      await onSave(card.id, buildEditablePatch(card.type, draft))
+      setDirty(false)
+    } catch (e: any) {
+      setError(String(e?.message || e || "Could not save that card."))
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  const icon = card.type === "delivery"
+    ? <Check className="h-3.5 w-3.5 text-blue-300/70" />
+    : SLOT_ICONS[card.type === "inbox" ? "email" : card.type] || null
+  const status = String(card.status || "draft")
+  const errors = Array.isArray(card.validation_errors) ? card.validation_errors : []
+
+  return (
+    <div className="rounded-xl bg-white/[0.035] p-3.5 ring-1 ring-white/[0.07]">
+      <div className="mb-3 flex items-center justify-between gap-3">
+        <div className="min-w-0">
+          <div className="flex items-center gap-2">
+            {icon}
+            <span className="truncate text-[12px] font-semibold uppercase tracking-[0.08em] text-white/40">
+              {card.title || card.type}
+            </span>
+          </div>
+          <p className="mt-1 text-[12px] text-white/25">{status === "invalid" ? "Needs attention" : "Ready to tune"}</p>
+        </div>
+        <button
+          type="button"
+          onClick={save}
+          disabled={!dirty || saving}
+          className="flex h-8 shrink-0 items-center gap-1.5 rounded-lg bg-white px-2.5 text-[12px] font-semibold text-[#07070d] transition hover:bg-white/90 disabled:bg-white/20 disabled:text-white/40"
+        >
+          {saving ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Save className="h-3.5 w-3.5" />}
+          Save
+        </button>
+      </div>
+
+      <CardFields card={draft as OnboardingCard} updateField={updateField} />
+
+      {errors.length > 0 && (
+        <div className="mt-3 rounded-lg bg-amber-400/[0.08] px-3 py-2 text-[12px] text-amber-200/70 ring-1 ring-amber-300/10">
+          {errors.join(", ")}
+        </div>
+      )}
+      {error && (
+        <div className="mt-3 rounded-lg bg-red-400/[0.08] px-3 py-2 text-[12px] text-red-200/70 ring-1 ring-red-300/10">
+          {error}
+        </div>
+      )}
+    </div>
+  )
+}
+
+function CardFields({
+  card,
+  updateField,
+}: {
+  card: OnboardingCard
+  updateField: (field: string, value: unknown) => void
+}) {
+  if (card.type === "news") {
+    return (
+      <div className="space-y-3">
+        <TextField label="Track this" value={card.focus || ""} onChange={(value) => updateField("focus", value)} />
+        <TextAreaField label="Focus on" value={card.scope_summary || ""} onChange={(value) => updateField("scope_summary", value)} />
+        <TextField label="Entities" value={listToText(card.tracked_entities)} onChange={(value) => updateField("tracked_entities", textToList(value))} placeholder="Companies, people, concepts" />
+        <TextField label="Preferred sources" value={listToText(card.preferred_sources)} onChange={(value) => updateField("preferred_sources", textToList(value))} />
+        <TextField label="Blocked sources" value={listToText(card.blocked_sources)} onChange={(value) => updateField("blocked_sources", textToList(value))} />
+        <TextField label="Avoid" value={listToText(card.avoid_terms)} onChange={(value) => updateField("avoid_terms", textToList(value))} />
+      </div>
+    )
+  }
+
+  if (card.type === "lesson") {
+    return (
+      <div className="space-y-3">
+        <TextField label="Learn this" value={card.topic || ""} onChange={(value) => updateField("topic", value)} />
+        <SelectField label="Starting level" value={card.starting_level || "beginner"} onChange={(value) => updateField("starting_level", value)} options={["beginner", "intermediate", "advanced"]} />
+        <TextAreaField label="Goal" value={card.curriculum_goal || ""} onChange={(value) => updateField("curriculum_goal", value)} />
+        <SelectField label="Depth" value={card.depth || "standard"} onChange={(value) => updateField("depth", value)} options={["quick", "standard", "deep"]} />
+      </div>
+    )
+  }
+
+  if (card.type === "inbox") {
+    return (
+      <div className="space-y-3">
+        <SelectField label="Inbox" value={card.preference_status || "skipped"} onChange={(value) => updateField("preference_status", value)} options={["wanted", "not_wanted", "skipped"]} />
+        <TextAreaField label="Include these senders" value={senderListToText(card.selected_senders)} onChange={(value) => updateField("selected_senders", textToSenderList(value))} />
+        <TextField label="Exclude these senders" value={listToText(card.blocked_senders)} onChange={(value) => updateField("blocked_senders", textToList(value))} />
+        <TextField label="Surface these updates" value={listToText(card.content_types)} onChange={(value) => updateField("content_types", textToList(value))} />
+      </div>
+    )
+  }
+
+  return (
+    <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+      <TextField label="Delivery time" value={card.send_time || "07:00"} onChange={(value) => updateField("send_time", value)} type="time" />
+      <TextField label="Timezone" value={card.timezone || "America/New_York"} onChange={(value) => updateField("timezone", value)} />
+      <SelectField label="Length" value={card.length || "standard"} onChange={(value) => updateField("length", value)} options={["short", "standard", "deep"]} />
+      <SelectField label="Style" value={card.style || "morning-brief"} onChange={(value) => updateField("style", value)} options={["morning-brief", "reference-mode", "deep-read"]} />
+    </div>
+  )
+}
+
+function TextField({
+  label,
+  value,
+  onChange,
+  placeholder,
+  type = "text",
+}: {
+  label: string
+  value: string
+  onChange: (value: string) => void
+  placeholder?: string
+  type?: string
+}) {
+  return (
+    <label className="block">
+      <span className={LABEL_CLASS}>{label}</span>
+      <input
+        type={type}
+        value={value}
+        onChange={(event) => onChange(event.target.value)}
+        placeholder={placeholder}
+        className={INPUT_CLASS}
+      />
+    </label>
+  )
+}
+
+function TextAreaField({
+  label,
+  value,
+  onChange,
+}: {
+  label: string
+  value: string
+  onChange: (value: string) => void
+}) {
+  return (
+    <label className="block">
+      <span className={LABEL_CLASS}>{label}</span>
+      <textarea
+        value={value}
+        onChange={(event) => onChange(event.target.value)}
+        rows={3}
+        className={`${INPUT_CLASS} resize-none leading-relaxed`}
+      />
+    </label>
+  )
+}
+
+function SelectField({
+  label,
+  value,
+  onChange,
+  options,
+}: {
+  label: string
+  value: string
+  onChange: (value: string) => void
+  options: string[]
+}) {
+  return (
+    <label className="block">
+      <span className={LABEL_CLASS}>{label}</span>
+      <select
+        value={value}
+        onChange={(event) => onChange(event.target.value)}
+        className={INPUT_CLASS}
+      >
+        {options.map((option) => (
+          <option key={option} value={option} className="bg-[#12121a] text-white">
+            {option.replace(/-/g, " ")}
+          </option>
+        ))}
+      </select>
+    </label>
+  )
+}
+
+function buildEditablePatch(cardType: OnboardingCard["type"], draft: Record<string, any>): Record<string, unknown> {
+  if (cardType === "news") {
+    return {
+      focus: draft.focus || "",
+      scope_summary: draft.scope_summary || "",
+      tracked_entities: Array.isArray(draft.tracked_entities) ? draft.tracked_entities : [],
+      preferred_sources: Array.isArray(draft.preferred_sources) ? draft.preferred_sources : [],
+      blocked_sources: Array.isArray(draft.blocked_sources) ? draft.blocked_sources : [],
+      avoid_terms: Array.isArray(draft.avoid_terms) ? draft.avoid_terms : [],
+    }
+  }
+
+  if (cardType === "lesson") {
+    return {
+      topic: draft.topic || "",
+      starting_level: draft.starting_level || "beginner",
+      curriculum_goal: draft.curriculum_goal || "",
+      depth: draft.depth || "standard",
+      scope_summary: draft.scope_summary || "",
+    }
+  }
+
+  if (cardType === "inbox") {
+    return {
+      preference_status: draft.preference_status || "skipped",
+      selected_senders: Array.isArray(draft.selected_senders) ? draft.selected_senders : [],
+      blocked_senders: Array.isArray(draft.blocked_senders) ? draft.blocked_senders : [],
+      content_types: Array.isArray(draft.content_types) ? draft.content_types : [],
+    }
+  }
+
+  return {
+    cadence: "daily",
+    send_time: draft.send_time || "07:00",
+    timezone: draft.timezone || "America/New_York",
+    length: draft.length || "standard",
+    style: draft.style || "morning-brief",
+  }
 }
 
 function OnboardFlow() {
@@ -345,7 +652,7 @@ function OnboardFlow() {
 
   const [phase, setPhase] = useState<"conversation" | "gmail_connect" | "scanning" | "recommendation" | "approved">("conversation")
   const [recommendationData, setRecommendationData] = useState<RecommendationData | null>(null)
-  const [, setServerSnapshot] = useState<OnboardingSnapshot | null>(null)
+  const [serverSnapshot, setServerSnapshot] = useState<OnboardingSnapshot | null>(null)
   const [approving, setApproving] = useState(false)
   const [showGreetingPrompt, setShowGreetingPrompt] = useState(false)
   const [conversationStarted, setConversationStarted] = useState(false)
@@ -514,6 +821,29 @@ function OnboardFlow() {
     setTyping(true)
 
     try {
+      if (phase === "recommendation" && recommendationData) {
+        const res = await fetch("/api/onboard/refine", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            instruction: msg,
+            recommendation_version_id: serverSnapshot?.recommendation?.version_id,
+            current_config_version: serverSnapshot?.recommendation?.config_version,
+          }),
+        })
+        if (res.status === 401) { router.push("/auth?redirectedFrom=/onboard"); return }
+        const data = await res.json().catch(() => null)
+        setTyping(false)
+
+        if (data?.snapshot) applyServerSnapshot(data.snapshot)
+        if (data?.rune_message) {
+          addRuneMessage(data.rune_message)
+        } else if (!res.ok) {
+          addRuneMessage(data?.error?.message || "I couldn't apply that change. Try saying it another way.")
+        }
+        return
+      }
+
       const res = await fetch("/api/onboard/chat", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -683,17 +1013,37 @@ function OnboardFlow() {
     } catch {}
   }
 
+  async function handleSaveCard(cardId: string, fields: Record<string, unknown>) {
+    const res = await fetch(`/api/onboard/cards/${encodeURIComponent(cardId)}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        fields,
+        recommendation_version_id: serverSnapshot?.recommendation?.version_id,
+        current_config_version: serverSnapshot?.recommendation?.config_version,
+      }),
+    })
+    const data = await res.json().catch(() => null)
+    if (data?.snapshot) applyServerSnapshot(data.snapshot)
+    if (!res.ok) {
+      throw new Error(data?.error?.message || "Could not save that card.")
+    }
+  }
+
   async function handleApprove() {
     if (!recommendationData || approving) return
     setApproving(true)
 
     try {
+      const deliveryCard = serverSnapshot?.recommendation?.cards?.find((card) => card.type === "delivery")
       const config = {
         slot_allocation: recommendationData.slot_allocation,
         inbox_curation_plan: recommendationData.inbox_curation_plan || null,
         digest_preferences: {
-          delivery_time: "07:00",
-          timezone: Intl.DateTimeFormat().resolvedOptions().timeZone || "America/New_York"
+          delivery_time: deliveryCard?.send_time || "07:00",
+          timezone: deliveryCard?.timezone || Intl.DateTimeFormat().resolvedOptions().timeZone || "America/New_York",
+          length: deliveryCard?.length || "standard",
+          style: deliveryCard?.style || "morning-brief",
         }
       }
 
@@ -766,6 +1116,8 @@ function OnboardFlow() {
                   {recommendationData && phase === "recommendation" && (
                     <RecommendationCard
                       data={recommendationData}
+                      cards={serverSnapshot?.recommendation?.cards || []}
+                      onSaveCard={handleSaveCard}
                       onApprove={handleApprove}
                       approving={approving}
                     />
@@ -797,7 +1149,7 @@ function OnboardFlow() {
                     onFocus={beginConversation}
                     onChange={handleTextareaInput}
                     onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey && !("ontouchstart" in window)) { e.preventDefault(); handleSend() } }}
-                    placeholder="Message Rune..."
+                    placeholder={phase === "recommendation" ? "Refine your Rune..." : "Message Rune..."}
                     disabled={loading}
                     rows={1}
                     className="flex-1 resize-none bg-transparent text-[16px] text-white placeholder-white/25 outline-none disabled:opacity-50 leading-relaxed max-h-[100px]"

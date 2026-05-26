@@ -154,6 +154,24 @@ export const onboardOpeningMessageSchema = z.object({
   rune_message: nonEmptyString
 })
 
+export const onboardingRefinementPatchSchema = z.object({
+  summary: nonEmptyString,
+  operations: z.array(z.object({
+    op: z.literal("update_card"),
+    card_id: nonEmptyString,
+    fields: z.record(z.unknown()).default({})
+  })).default([]),
+  clarifying_question: z.string().trim().optional().nullable()
+}).superRefine((value, ctx) => {
+  if (value.operations.length === 0 && !value.clarifying_question) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ["operations"],
+      message: "operations or clarifying_question is required"
+    })
+  }
+})
+
 const mappedNewsTopicSchema = z.object({
   normalized_topic: nonEmptyString,
   scope_summary: nonEmptyString,
@@ -183,4 +201,5 @@ export type SenderClassificationBatch = z.infer<typeof senderClassificationBatch
 export type OnboardTechnicalConfig = z.infer<typeof onboardTechnicalConfigSchema>
 export type OnboardIntentSignal = z.infer<typeof onboardIntentSignalSchema>
 export type OnboardRecommendationSignal = z.infer<typeof onboardRecommendationSignalSchema>
+export type OnboardingRefinementPatch = z.infer<typeof onboardingRefinementPatchSchema>
 export type TopicMappingResultSchema = z.infer<typeof topicMappingResultSchema>

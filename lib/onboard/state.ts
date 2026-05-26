@@ -78,6 +78,12 @@ export type OnboardingMutationResponse = {
   }
 }
 
+export type OnboardingPatchOperation = {
+  op: "update_card"
+  card_id: string
+  fields: Record<string, unknown>
+}
+
 type OnboardingContext =
   | {
       available: true
@@ -777,6 +783,136 @@ export async function applyRecommendationCardEdit(
   )
 
   return { ok: true }
+}
+
+export async function applyRecommendationPatchOperations(
+  userId: string,
+  operations: OnboardingPatchOperation[],
+  summary: string
+): Promise<{ ok: true; applied_count: number } | { ok: false; code: string; message: string }> {
+  const context = await getOrCreateOnboardingContext(userId)
+  if (!context.available) return { ok: false, code: "state_storage_unavailable", message: "Onboarding state is not ready." }
+  if (!context.session.current_recommendation_version_id) {
+    return { ok: false, code: "recommendation_missing", message: "No recommendation is ready to refine." }
+  }
+
+  const { data: currentVersion, error: readError } = await supabaseServiceRole
+    .from("onboarding_recommendation_versions")
+    .select("cards, user_facing_summary, raw_recommendation")
+    .eq("id", context.session.current_recommendation_version_id)
+    .maybeSingle()
+
+  if (readError) {
+    if (isStateStorageUnavailable(readError)) {
+      return { ok: false, code: "state_storage_unavailable", message: "Onboarding state is not ready." }
+    }
+    throw readError
+  }
+
+  const cards = Array.isArray(currentVersion?.cards) ? [...currentVersion.cards] : []
+  if (cards.length === 0) {
+    return { ok: false, code: "recommendation_missing", message: "No editable cards are ready." }
+  }
+
+  const configVersion = context.session.config_version + 1
+  const updatedCardIds: string[] = []
+
+  for (const operation of operations || []) {
+    if (operation.op !== "update_card") continue
+    const cardIndex = cards.findIndex((card: any) => card.id === operation.card_id)
+    if (cardIndex < 0) {
+      return { ok: false, code: "card_not_found", message: `Card ${operation.card_id} no longer exists.` }
+    }
+
+    const editableFields = sanitizeCardEditFields(operation.fields || {})
+    if (Object.keys(editableFields).length === 0) continue
+
+    const updatedCard = validateCard({
+      ...cards[cardIndex],
+      ...editableFields,
+      updated_at: nowIso(),
+      config_version: configVersion,
+    })
+    const errors = Array.isArray(updatedCard.validation_errors) ? updatedCard.validation_errors : []
+    if (errors.length > 0) {
+      return {
+        ok: false,
+        code: "refinement_would_make_card_invalid",
+        message: `That refinement needs one more detail: ${errors.join(", ")}.`,
+      }
+    }
+
+    cards[cardIndex] = updatedCard
+    updatedCardIds.push(operation.card_id)
+  }
+
+  if (updatedCardIds.length === 0) {
+    return { ok: false, code: "empty_refinement_patch", message: "I need a more specific change to apply." }
+  }
+
+  const hasNonDeliveryCard = cards.some((card: any) => card.type !== "delivery")
+  const hasMeaningfulFocus = cards.some((card: any) =>
+    (card.type === "news" && isMeaningfulFocus(card.focus)) ||
+    (card.type === "lesson" && isMeaningfulFocus(card.topic)) ||
+    (card.type === "inbox" && card.preference_status === "wanted")
+  )
+
+  if (!hasNonDeliveryCard || !hasMeaningfulFocus) {
+    return {
+      ok: false,
+      code: "minimum_intent_would_break",
+      message: "That would leave the Rune without a clear focus. What should it track instead?",
+    }
+  }
+
+  const validationErrors = cards.flatMap((card: any) =>
+    Array.isArray(card.validation_errors) ? card.validation_errors : []
+  )
+
+  const { data: version, error: insertError } = await supabaseServiceRole
+    .from("onboarding_recommendation_versions")
+    .insert({
+      user_id: userId,
+      rune_id: context.rune.id,
+      onboarding_session_id: context.session.id,
+      config_version: configVersion,
+      cards,
+      user_facing_summary: currentVersion?.user_facing_summary || [],
+      raw_recommendation: currentVersion?.raw_recommendation || {},
+      validation_errors: validationErrors,
+    })
+    .select("id")
+    .single()
+
+  if (insertError && !isStateStorageUnavailable(insertError)) throw insertError
+  if (!version) return { ok: false, code: "refinement_save_failed", message: "Could not save that refinement." }
+
+  const { error: updateError } = await supabaseServiceRole
+    .from("onboarding_sessions")
+    .update({
+      current_recommendation_version_id: version.id,
+      config_version: configVersion,
+      state: "recommendation_ready",
+      updated_at: nowIso(),
+    })
+    .eq("id", context.session.id)
+
+  if (updateError && !isStateStorageUnavailable(updateError)) throw updateError
+
+  await recordOnboardingEvent(
+    userId,
+    "refinement_applied",
+    {
+      summary,
+      operation_count: updatedCardIds.length,
+      card_ids: updatedCardIds,
+      config_version: configVersion,
+    },
+    "server",
+    context.session.state
+  )
+
+  return { ok: true, applied_count: updatedCardIds.length }
 }
 
 export async function markOnboardingApproved(userId: string): Promise<void> {
