@@ -7,8 +7,8 @@ export default defineConfig({
     environment: 'jsdom',
     setupFiles: ['./setupTests.ts'],
     globals: true,
-    include: ['**/*.{test,spec}.{ts,tsx}']
+    include: ['**/*.{test,spec}.{ts,tsx}'],
+    exclude: ['tests/smoke/**', 'node_modules/**']
   }
 })
-
 
