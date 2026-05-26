@@ -1,6 +1,7 @@
 # Onboarding Spec
 
 Last updated: 2026-05-26
+Spec version: 1.1
 Status: draft for human approval before Phase 0c implementation
 File: `docs/ONBOARDING_SPEC.md`
 
@@ -33,6 +34,8 @@ No critical onboarding state should depend on `sessionStorage`.
 - Recommendation refinement is a loop, not a one-way step.
 - Every structured LLM output uses the Phase 0b gateway and a Zod schema.
 - Artifacts are keyed by `rune_id` even during one-Rune alpha.
+- All onboarding surfaces should meet WCAG AA expectations for keyboard navigation, focus states, labeling, contrast, and screen reader semantics.
+- Copy and default choices may be experiment-ready later, but Phase 0c does not require an A/B testing system.
 
 ## Alpha Scope
 
@@ -156,6 +159,8 @@ If the minimum gate passes:
 conversation -> intent_ready
 ```
 
+On transition to `intent_ready`, the chat history moves to a secondary surface: collapsed history, side panel, or read-only transcript. The recommendation workspace and its refinement input become the primary conversational surface.
+
 If the gate fails, the server returns:
 
 ```ts
@@ -188,6 +193,13 @@ Required controls:
 - Chat input.
 - `Build my Rune` action once there is at least some user-provided signal.
 - Optional small progress indicator based on missing gate fields.
+
+Initial empty state:
+
+- Server creates or resumes an onboarding session in `conversation`.
+- Rune sends one opening message from the server, not hardcoded client copy.
+- The opening message asks for the user's desired daily outcome and gives one or two concrete examples without forcing a rigid template.
+- The empty-state UI must be usable by keyboard before any user message is sent.
 
 ### Contextual Inbox Choice
 
@@ -252,6 +264,21 @@ type BaseOnboardingCard = {
   updated_at: string
 }
 ```
+
+### Card Status Rules
+
+Card status is recomputed server-side after every direct edit, accepted refinement patch, or recommendation regeneration. The frontend should not assume a card is valid until the server returns an updated snapshot.
+
+Status meanings:
+
+| Status | Meaning |
+| --- | --- |
+| `draft` | Card exists but has not yet been validated for approval |
+| `valid` | Card passes its type-specific validation and can be approved |
+| `invalid` | Card fails validation and must show `validation_errors` |
+| `pending_patch` | Server is applying a direct edit or natural-language patch |
+
+Direct edits may be optimistic in the UI, but the server response is authoritative. Backend writes use last-write-wins at the individual field level.
 
 ### News Beat Card
 
@@ -411,6 +438,54 @@ Validation:
 - `timezone` must be an IANA timezone string.
 - Cadence is daily-only in alpha.
 
+## Recommendation Versioning
+
+`recommendation_version_id` and `config_version` are related but not interchangeable.
+
+| Field | Type | Meaning |
+| --- | --- | --- |
+| `recommendation_version_id` | UUID/string | Immutable identifier for the recommendation snapshot currently visible to the user |
+| `config_version` | integer | Monotonic version counter for the editable onboarding config |
+
+Rules:
+
+- The first successful recommendation generation creates a `recommendation_version_id` and sets `config_version` to `1`.
+- Every accepted card edit, accepted refinement patch, or full regeneration creates a new recommendation snapshot and increments `config_version`.
+- Clients send both fields on edits/refinements so the backend can detect stale writes.
+- If the client submits an old `recommendation_version_id` or `config_version`, the backend returns the latest `OnboardingSnapshot` and asks the client to refresh before applying the mutation.
+
+## Conversation Summary
+
+Conversation summary is server-owned and exists to ground recommendation generation without replaying the full chat every time.
+
+Generation rules:
+
+- Generate or refresh the summary after the first successful `intent_ready` transition.
+- Refresh on demand before recommendation generation if the existing summary is missing, stale, or does not cover recent turns.
+- Use the Phase 0b gateway with a `ConversationSummary` Zod schema.
+- Do not store OAuth tokens, raw email bodies, or secret values in the summary.
+
+Suggested schema:
+
+```ts
+type ConversationSummary = {
+  summary: string
+  extracted_intent: {
+    slot_types: Array<"news" | "lesson" | "inbox">
+    meaningful_focuses: string[]
+    delivery_preference?: {
+      send_time?: string
+      timezone?: string
+      length?: "short" | "standard" | "deep"
+      style?: "morning-brief" | "reference-mode" | "deep-read"
+    }
+    inbox_preference?: InboxPreferenceStatus
+  }
+  open_questions: string[]
+  confidence: number
+}
+```
+
 ## Refinement Loop
 
 The recommendation workspace has a persistent input below the cards.
@@ -487,7 +562,8 @@ Patch rules:
 - Patch cannot modify `user_id`, OAuth tokens, raw Gmail data, telemetry, or approval state.
 - Patch cannot create unsupported card types.
 - Patch cannot remove the final remaining non-delivery card unless it returns a `clarifying_question`.
-- Patch must preserve the minimum intent gate.
+- Patch must validate against the minimum intent gate before application.
+- If applying the patch would break the minimum intent gate, return a `clarifying_question` instead of applying it.
 - Patch must validate the full recommendation config after application.
 
 If patch application succeeds:
@@ -571,6 +647,15 @@ type OnboardingEventBase = {
 
 Onboarding funnel drop-off analysis is a Phase 0c deliverable.
 
+Card edit telemetry is debounced client-side to at most one `card_edited` event per field every 2 seconds. The server may also coalesce repeated edits in the state transition log, but must not lose the final accepted value.
+
+`abandoned` is recorded when either:
+
+- The user explicitly cancels onboarding.
+- A daily backend sweep finds an onboarding session with no state transitions and no telemetry events for 7 days.
+
+Sweep-created `abandoned` events use `source: "server"`.
+
 ## Persistence Rules
 
 ### Must Persist
@@ -582,7 +667,7 @@ All of these are keyed by `rune_id` and `user_id`.
 | Rune shell | Single alpha Rune per user, future multi-Rune ready |
 | Onboarding session | Current state, version, started/completed timestamps |
 | State transition log | Debugging, recovery, funnel analysis |
-| Conversation messages or summary | Reload/resume and recommendation grounding |
+| Conversation messages and summary | Reload/resume and recommendation grounding |
 | Structured intent | Minimum gate and recommendation generation |
 | Inbox preference | Wanted, not wanted, skipped, unknown |
 | Gmail connection status | Connected/disconnected, no tokens in telemetry |
@@ -645,7 +730,7 @@ Suggested Phase 0c API surfaces:
 | Endpoint | Purpose |
 | --- | --- |
 | `GET /api/onboard/state` | Return current `OnboardingSnapshot` |
-| `POST /api/onboard/chat` | Send chat turn and maybe advance state |
+| `POST /api/onboard/chat` | Send chat turn, persist assistant reply, and return the resulting state |
 | `POST /api/onboard/build` | User-triggered Build my Rune action and minimum gate check |
 | `POST /api/onboard/inbox-preference` | Persist wanted/not wanted/skipped |
 | `POST /api/onboard/scan-inbox` | Start or resume scan |
@@ -655,6 +740,23 @@ Suggested Phase 0c API surfaces:
 | `POST /api/onboard/approve` | Commit validated config |
 
 Implementation can keep existing endpoints temporarily, but frontend should move toward this state-based contract.
+
+Every mutating endpoint returns the updated `OnboardingSnapshot` or a typed snapshot diff that includes:
+
+```ts
+type OnboardingMutationResponse = {
+  ok: boolean
+  previous_state: string
+  snapshot: OnboardingSnapshot
+  error?: {
+    code: string
+    retryable: boolean
+    message: string
+  }
+}
+```
+
+The frontend renders from the returned snapshot instead of inferring whether the state changed.
 
 ## Validation Before Approval
 
@@ -684,8 +786,12 @@ Approval requires:
 - `Build my Rune` never fails silently.
 - Inbox skip is persisted and treated as valid.
 - Recommendation cards are editable directly.
+- Card status is recomputed server-side after edits, patches, and regenerations.
+- Mutating onboarding endpoints return an updated snapshot or typed snapshot diff.
 - Natural-language refinement can patch typed cards through the gateway.
 - User can reject a recommendation and continue refining.
 - Approval commits one validated config.
 - Onboarding state transitions and card edits emit telemetry.
+- Card edit telemetry debounce and `abandoned` semantics are implemented.
+- Onboarding surfaces meet WCAG AA expectations for keyboard and screen reader use.
 - Existing dashboard-era onboarding paths are gated, quarantined, or removed after the new path is stable.

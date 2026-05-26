@@ -1,7 +1,7 @@
 # Rune Rebuild Plan
 
 Last updated: 2026-05-26
-Version: 1.13
+Version: 1.14
 File: `docs/REBUILD_PLAN.md`
 
 This document is the source of truth for the Rune rebuild. It pins down the sequence, scope, exit criteria, and architectural direction so the team does not keep re-litigating the plan in chat.
@@ -562,6 +562,7 @@ Acceptance criteria:
 
 | Version | Date | Changes |
 | --- | --- | --- |
+| 1.14 | 2026-05-26 | Tightened `docs/ONBOARDING_SPEC.md` to v1.1 with card status rules, recommendation versioning, conversation summary generation, mutation response contracts, refinement gate validation, telemetry debounce, abandonment semantics, and accessibility/initial-state notes. |
 | 1.13 | 2026-05-26 | Added `docs/ONBOARDING_SPEC.md` as the Phase 0c onboarding/product spine implementation contract. |
 | 1.12 | 2026-05-26 | Completed Phase 0b code migration for production-relevant LLM call sites: onboarding chat turns now return schema-validated structured messages, preview news relevance uses schema validation, and dead legacy news synthesis was removed. |
 | 1.11 | 2026-05-25 | Migrated onboarding technical config generation onto the Phase 0b gateway with a schema-validated slot allocation contract. |
