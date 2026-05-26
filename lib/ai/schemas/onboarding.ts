@@ -2,69 +2,12 @@ import { z } from "zod"
 
 const nonEmptyString = z.string().trim().min(1)
 
-export const newsTopicClarifierSchema = z.object({
-  assistant_message: nonEmptyString,
-  done: z.coerce.boolean(),
-  news_scope: z.string().trim().min(1).nullable()
-}).superRefine((value, ctx) => {
-  if (!value.done && value.news_scope !== null) {
-    ctx.addIssue({
-      code: z.ZodIssueCode.custom,
-      path: ["news_scope"],
-      message: "news_scope must be null when done is false"
-    })
-  }
-  if (value.done && !value.news_scope) {
-    ctx.addIssue({
-      code: z.ZodIssueCode.custom,
-      path: ["news_scope"],
-      message: "news_scope is required when done is true"
-    })
-  }
-})
-
-export const lessonTopicClarifierSchema = z.object({
-  assistant_message: nonEmptyString,
-  done: z.coerce.boolean(),
-  lesson_scope: z.string().trim().min(1).nullable()
-}).superRefine((value, ctx) => {
-  if (!value.done && value.lesson_scope !== null) {
-    ctx.addIssue({
-      code: z.ZodIssueCode.custom,
-      path: ["lesson_scope"],
-      message: "lesson_scope must be null when done is false"
-    })
-  }
-  if (value.done && !value.lesson_scope) {
-    ctx.addIssue({
-      code: z.ZodIssueCode.custom,
-      path: ["lesson_scope"],
-      message: "lesson_scope is required when done is true"
-    })
-  }
-})
-
 export const inboxSenderRelevanceSchema = z.object({
   senders: z.array(z.object({
     address: nonEmptyString,
     content_type: nonEmptyString,
     relevance_score: z.coerce.number().min(0).max(1),
     relevance_reason: z.string().trim().default("")
-  }))
-})
-
-const senderClassificationLabelSchema = z.preprocess((value) => {
-  const normalized = String(value || "").trim().toLowerCase()
-  if (normalized === "yes") return "Yes"
-  if (normalized === "no") return "No"
-  if (normalized === "uncertain") return "Uncertain"
-  return value
-}, z.enum(["Yes", "No", "Uncertain"]))
-
-export const senderClassificationBatchSchema = z.object({
-  classifications: z.array(z.object({
-    candidate: z.coerce.number().int().min(1),
-    classification: senderClassificationLabelSchema
   }))
 })
 
@@ -194,10 +137,7 @@ export const topicMappingResultSchema = z.object({
   lesson: mappedLessonTopicSchema.nullable()
 })
 
-export type NewsTopicClarifier = z.infer<typeof newsTopicClarifierSchema>
-export type LessonTopicClarifier = z.infer<typeof lessonTopicClarifierSchema>
 export type InboxSenderRelevance = z.infer<typeof inboxSenderRelevanceSchema>
-export type SenderClassificationBatch = z.infer<typeof senderClassificationBatchSchema>
 export type OnboardTechnicalConfig = z.infer<typeof onboardTechnicalConfigSchema>
 export type OnboardIntentSignal = z.infer<typeof onboardIntentSignalSchema>
 export type OnboardRecommendationSignal = z.infer<typeof onboardRecommendationSignalSchema>

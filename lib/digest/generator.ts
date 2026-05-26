@@ -10,7 +10,6 @@ import {
 import { generateClaudeObject, generateOpenAIObject, LlmSchemaValidationError } from "@/lib/ai/gateway"
 import {
   dailyLessonContentSchema,
-  newsRelevanceEvaluationsSchema,
   unifiedNewsBriefSchema,
   type UnifiedNewsBrief
 } from "@/lib/ai/schemas/digest"
@@ -67,13 +66,6 @@ type NewsFreshnessTier = {
   key: "24h" | "72h" | "7d"
   operator: string
   framingLabel: string
-}
-
-type NewsRelevanceEvaluation = {
-  index: number
-  relevant: boolean
-  confidence: number
-  reason: string
 }
 
 type RetrievalFunnelLog = {
@@ -601,134 +593,6 @@ function hasUsableContentPreview(article: NewsArticle) {
   return !!article.contentPreview && article.contentPreview.trim().length >= 200
 }
 
-function fallbackRelevantNewsArticles(input: {
-  topic: NewsTopicRecord
-  articles: NewsArticle[]
-}) {
-  const topicTerms = String(input.topic.topic_text || "")
-    .toLowerCase()
-    .split(/[^a-z0-9]+/)
-    .filter((term) => term.length > 2)
-
-  const relevantArticles = input.articles.filter((article) => {
-    const haystack = `${article.title} ${article.description}`.toLowerCase()
-    const matchCount = topicTerms.reduce((count, term) => count + (haystack.includes(term) ? 1 : 0), 0)
-    return matchCount >= Math.min(2, topicTerms.length)
-  })
-
-  return {
-    relevantArticles,
-    evaluations: input.articles.map((article, index) => ({
-      index,
-      relevant: relevantArticles.includes(article),
-      confidence: relevantArticles.includes(article) ? 0.6 : 0.2,
-      reason: relevantArticles.includes(article)
-        ? "Matched multiple topic terms."
-        : "Did not match enough topic terms."
-    }))
-  }
-}
-
-async function filterRelevantNewsArticles(input: {
-  userId?: string | null
-  runId?: string | null
-  slotId?: string | null
-  topic: NewsTopicRecord
-  searchInstruction: string
-  articles: NewsArticle[]
-  professionalContext?: string | null
-}) {
-  if (!OPENAI_API_KEY) {
-    return fallbackRelevantNewsArticles(input)
-  }
-
-  const contextClause = input.professionalContext
-    ? `\n- Consider the user's professional context when evaluating relevance: "${input.professionalContext}". An article about foreign policy in another country is not relevant to a US-focused professional unless it directly impacts their domain.`
-    : ""
-
-  const prompt = `You are Rune's news relevance filter.
-Your job is to decide whether each candidate source is substantively about the user's exact topic.
-
-Core rule:
-- A source is relevant only if a person tracking the exact topic would consider it a meaningful update on that topic.
-- Sharing one keyword is not enough.
-- Tangential, adjacent, or loosely related sources are NOT relevant.${contextClause}
-- When in doubt, reject.
-
-Return STRICT JSON:
-{
-  "evaluations": [
-    {
-      "index": 0,
-      "relevant": true,
-      "confidence": 0.0,
-      "reason": "string"
-    }
-  ]
-}
-
-Confidence should be between 0 and 1.
-Keep reasons short.`
-
-  let evaluations: NewsRelevanceEvaluation[]
-  try {
-    const parsed = await generateOpenAIObject({
-      apiKey: OPENAI_API_KEY,
-      model: "gpt-4o",
-      temperature: 0.1,
-      messages: [
-        { role: "system", content: prompt },
-        {
-          role: "user",
-          content: JSON.stringify({
-            topic: input.topic.topic_text,
-            search_instruction: input.searchInstruction,
-            candidates: input.articles.map((article, index) => ({
-              index,
-              title: article.title,
-              description: article.description,
-              content_preview: article.contentPreview || null,
-              source: article.source,
-              pubDate: article.pubDate
-            }))
-          })
-        }
-      ],
-      schema: newsRelevanceEvaluationsSchema,
-      outputShapeName: "NewsRelevanceEvaluations",
-      telemetry: {
-        userId: input.userId || null,
-        runId: input.runId || null,
-        slotId: input.slotId || null,
-        callSiteName: "digest.news.relevance_filter",
-        filePath: "lib/digest/generator.ts",
-        functionName: "filterRelevantNewsArticles",
-        metadata: {
-          candidate_count: input.articles.length,
-          topic_id: input.topic.id
-        }
-      }
-    })
-    evaluations = parsed.evaluations
-  } catch (e) {
-    if (e instanceof LlmSchemaValidationError) {
-      return fallbackRelevantNewsArticles(input)
-    }
-    throw e
-  }
-
-  const relevantIndexes = new Set(
-    evaluations
-      .filter((evaluation) => evaluation.relevant && evaluation.confidence >= 0.55)
-      .map((evaluation) => evaluation.index)
-  )
-
-  return {
-    relevantArticles: input.articles.filter((_, index) => relevantIndexes.has(index)),
-    evaluations
-  }
-}
-
 async function getActiveLessonTopicRecords(userId: string): Promise<LessonTopicRecord[]> {
   const { data, error } = await supabaseServiceRole
     .from("user_lesson_topics")
@@ -1209,60 +1073,6 @@ async function fetchNewsArticlesForTier(
       google_rss_skipped: skippedGoogle,
       after_dedup: deduped.length,
     },
-  }
-}
-
-export async function previewNewsTopicSignal(input: {
-  topicText: string
-  scopeSummary?: string | null
-  retrievalHint?: string | null
-  retrievalQueries?: string[] | null
-  requiredTerms?: string[][] | null
-}) {
-  const topic: NewsTopicRecord = {
-    id: "__preview__",
-    topic_text: input.topicText,
-    timeframe: "7d",
-    topic_mapping_json: {
-      normalized_topic: input.topicText,
-      scope_summary: input.scopeSummary || input.topicText,
-      retrieval_hint: input.retrievalHint || null,
-      retrieval_queries: input.retrievalQueries || undefined,
-      required_terms: input.requiredTerms || undefined
-    }
-  }
-
-  const searchInstruction = buildNewsSearchInstruction(topic)
-  const retrieval = await fetchNewsArticlesForTier(topic, NEWS_FRESHNESS_TIERS[2])
-  const substantiveArticles = retrieval.articles.filter(isSubstantiveArticle)
-  const preFilteredArticles = substantiveArticles.filter((article) => passesTopicPreFilter(article, topic))
-  const alreadyHydrated = preFilteredArticles.filter((article) => hasUsableContentPreview(article))
-  const needsHydration = preFilteredArticles.filter((article) => !hasUsableContentPreview(article))
-  const freshlyHydrated = await Promise.all(
-    needsHydration.slice(0, 6).map((article) => hydrateArticlePreview(article))
-  )
-  const hydrationPassedArticles = [...alreadyHydrated, ...freshlyHydrated.filter(hasUsableContentPreview)]
-  const hydrationFailedButDescriptive = freshlyHydrated
-    .filter((a) => !hasUsableContentPreview(a))
-    .filter((a) => `${a.title} ${a.description}`.trim().length >= 80)
-  const articlesForRelevance = [...hydrationPassedArticles, ...hydrationFailedButDescriptive]
-  const relevance = await filterRelevantNewsArticles({
-    topic,
-    searchInstruction,
-    articles: articlesForRelevance
-  })
-
-  const relevantCount = relevance.relevantArticles.length
-  let bucket: "high" | "moderate" | "likely_sparse" = "likely_sparse"
-  if (relevantCount >= 4) bucket = "high"
-  else if (relevantCount >= 2) bucket = "moderate"
-
-  return {
-    bucket,
-    relevant_count: relevantCount,
-    candidate_count: retrieval.articles.length,
-    query: retrieval.query,
-    sample_titles: relevance.relevantArticles.slice(0, 3).map((article) => article.title)
   }
 }
 

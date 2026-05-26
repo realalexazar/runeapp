@@ -2,20 +2,16 @@ import { describe, expect, it } from "vitest"
 import { extractJsonObject, redactLlmRawOutput } from "@/lib/ai/json"
 import {
   dailyLessonContentSchema,
-  newsRelevanceEvaluationsSchema,
   newsletterSummaryMapSchema,
   unifiedNewsBriefSchema,
 } from "@/lib/ai/schemas/digest"
 import { lessonCurriculumSchema } from "@/lib/ai/schemas/lesson-curriculum"
 import {
   inboxSenderRelevanceSchema,
-  lessonTopicClarifierSchema,
-  newsTopicClarifierSchema,
   onboardConversationTurnSchema,
   onboardOpeningMessageSchema,
   onboardRecommendationTurnSchema,
   onboardTechnicalConfigSchema,
-  senderClassificationBatchSchema,
   topicMappingResultSchema,
 } from "@/lib/ai/schemas/onboarding"
 
@@ -63,20 +59,6 @@ describe("lessonCurriculumSchema", () => {
 })
 
 describe("onboarding LLM schemas", () => {
-  it("enforces clarifier completion contracts", () => {
-    expect(newsTopicClarifierSchema.parse({
-      assistant_message: "Got it.",
-      done: true,
-      news_scope: "Daily updates on AI regulation."
-    }).done).toBe(true)
-
-    expect(() => lessonTopicClarifierSchema.parse({
-      assistant_message: "What outcome do you want?",
-      done: false,
-      lesson_scope: "not allowed yet"
-    })).toThrow()
-  })
-
   it("normalizes sender relevance scores", () => {
     const parsed = inboxSenderRelevanceSchema.parse({
       senders: [{
@@ -88,22 +70,6 @@ describe("onboarding LLM schemas", () => {
     })
 
     expect(parsed.senders[0].relevance_score).toBe(0.8)
-  })
-
-  it("normalizes sender classification labels", () => {
-    const parsed = senderClassificationBatchSchema.parse({
-      classifications: [
-        { candidate: "1", classification: "yes" },
-        { candidate: 2, classification: "Uncertain" },
-        { candidate: 3, classification: "NO" }
-      ]
-    })
-
-    expect(parsed.classifications.map((item) => item.classification)).toEqual([
-      "Yes",
-      "Uncertain",
-      "No"
-    ])
   })
 
   it("accepts technical slot configs and normalizes slot types", () => {
@@ -214,20 +180,4 @@ describe("digest LLM schemas", () => {
     expect(parsed.articles_used).toBe(2)
   })
 
-  it("normalizes news relevance evaluations", () => {
-    const parsed = newsRelevanceEvaluationsSchema.parse({
-      evaluations: [{
-        index: "1",
-        relevant: "true",
-        confidence: "0.72",
-        reason: "Substantive match."
-      }]
-    })
-
-    expect(parsed.evaluations[0]).toMatchObject({
-      index: 1,
-      relevant: true,
-      confidence: 0.72
-    })
-  })
 })

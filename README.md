@@ -41,15 +41,16 @@ Google OAuth client redirect URIs:
 - `pnpm format:check`: check formatting
 - `pnpm test`: run unit tests (Vitest)
 - `pnpm test:watch`: watch mode
+- `pnpm smoke:install`: install Playwright Chromium
+- `pnpm smoke:onboard`: run onboarding smoke tests
 
 ### Structure
-- `app/` App Router routes, layouts, middleware-protected dashboard
+- `app/` App Router routes, layouts, canonical `/onboard`, and post-onboarding dashboard
 - `lib/supabase/` Supabase clients (browser/server) using cookie-based auth
 - `app/api/connect/gmail/start` and `.../callback` OAuth flow for Gmail (readonly)
-- `app/api/backfill/start` Backfill Gmail (Primary + Updates, last 30 days) with pagination
-- `app/api/parse/run` Parse unprocessed emails, sanitize HTML/text, detect newsletters
+- `app/api/onboard/*` server-owned onboarding state, recommendation, refinement, Gmail scan, and approval routes
+- `app/api/backfill/start` Dev/admin-only Gmail backfill helper
 - `app/api/backfill/progress` Lightweight progress endpoint (counts `messages_raw`)
-- `components/BackfillParseControls` Dashboard control for Backfill/Parse with inline results
 - `lib/env.ts` runtime env validation with Zod
 
 ### CI
@@ -57,8 +58,11 @@ GitHub Actions workflow runs typecheck, lint, tests, and build. Set secrets:
 - `NEXT_PUBLIC_SUPABASE_URL`
 - `NEXT_PUBLIC_SUPABASE_ANON_KEY`
 
-### Backfill & Parse (local testing)
+### Legacy Backfill Helpers
 
+These routes are dev/admin-only during the rebuild. They are not part of the canonical onboarding flow.
+
+<!-- Historical notes kept out of the active quickstart:
 1) Connect Gmail from the dashboard (readonly scope).
 2) Click "Start Backfill". This paginates Gmail and ingests raw emails:
    - Scope: Primary + Updates, last 30 days
@@ -74,6 +78,7 @@ GitHub Actions workflow runs typecheck, lint, tests, and build. Set secrets:
 Notes:
 - Re-running Backfill/Parse is safe (idempotent).
 - Parse returns `{ ok, parsed, errors }`. When `parsed` is 0 repeatedly, the backlog is drained.
+-->
 
 ### Docker
 Build and run locally:

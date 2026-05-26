@@ -36,6 +36,6 @@ export default defineConfig({
         },
         url: localBaseURL,
         reuseExistingServer: !process.env.CI,
-        timeout: 120_000,
+        timeout: 240_000,
       },
 })

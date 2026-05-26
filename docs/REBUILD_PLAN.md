@@ -547,6 +547,7 @@ Acceptance criteria:
 4. Smoke-test the production onboarding path now that `supabase/migrations/20260526120000_onboarding_state_machine.sql` is applied.
 5. Decide whether `app/api/digest/fetch-emails` and `app/api/backfill/start` should be removed or repointed to shared modules after their production gate has soaked.
 6. Decide whether Google News RSS/web hydration metadata should keep raw public queries or move to hashed query labels in Phase 0c.
+7. Re-run an authenticated onboarding flow against production and capture any remaining Phase 0c bugs before drafting the exit memo.
 
 ## Decision Log
 
@@ -578,6 +579,7 @@ The plan is changing quickly because the rebuild is active. Going forward, group
 
 | Version | Date | Changes |
 | --- | --- | --- |
+| 1.18 | 2026-05-26 | Cleaned dashboard-era onboarding drift: dashboard now redirects incomplete users to `/onboard`; deleted old onboarding card components, legacy clarifier/classification/finalize routes, old topic preview route, and the deprecated sender batch classifier. |
 | 1.17 | 2026-05-26 | Continued Phase 0c after production migration: added editable server-backed recommendation cards, stale-version checks for direct edits, and `/api/onboard/refine` for schema-validated natural-language refinement patches. |
 | 1.16 | 2026-05-26 | Started Phase 0c implementation: added onboarding state-machine migration, server snapshot/state helpers, state/build/inbox/card APIs, snapshot hydration in `/onboard`, scan/recommend/approve state hooks, Gmail connect telemetry hooks, and production gating for dev Gmail routes. |
 | 1.15 | 2026-05-26 | Added phase statuses, populated current alpha state from the controlled Phase 0a snapshot, added Phase 0a/0b exit memo follow-through, clarified the remaining real-traffic cost baseline question, and added document-maintenance guidance. |

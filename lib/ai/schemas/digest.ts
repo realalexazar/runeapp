@@ -23,16 +23,6 @@ export const unifiedNewsBriefSchema = z.object({
   articles_used: z.coerce.number().int().min(0).optional()
 })
 
-export const newsRelevanceEvaluationsSchema = z.object({
-  evaluations: z.array(z.object({
-    index: z.coerce.number().int().min(0),
-    relevant: z.coerce.boolean(),
-    confidence: z.coerce.number().min(0).max(1),
-    reason: z.string().trim().default("")
-  }))
-})
-
 export type NewsletterSummaryMap = z.infer<typeof newsletterSummaryMapSchema>
 export type DailyLessonContent = z.infer<typeof dailyLessonContentSchema>
 export type UnifiedNewsBrief = z.infer<typeof unifiedNewsBriefSchema>
-export type NewsRelevanceEvaluations = z.infer<typeof newsRelevanceEvaluationsSchema>

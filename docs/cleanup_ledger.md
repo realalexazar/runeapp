@@ -18,9 +18,11 @@ This ledger tracks stale migrations, antiquated code paths, and outdated product
 | Migrations | `supabase/migrations/` contains only `20260401120000_onboard_phase_and_commit_approval.sql` plus the new Phase 0a telemetry migration | Current production schema appears to live mostly outside repo migrations | Needs schema ground truth | Export current Supabase schema before deleting or rewriting migration history |
 | SQL docs | `docs/migrations/*.sql` and many root `docs/*.sql` files | SQL files are documentation/helper scripts, not canonical Supabase migrations | Ambiguous | Classify each as `historical`, `query`, or `promote-to-migration` |
 | Package metadata | `package.json` name was `"mortgage"` | Product is Rune | Cleaned | Renamed package to `runeapp` |
-| Dashboard onboarding | `app/(app)/dashboard/page.tsx` imports `components/OnboardingFlow.tsx` | User confirmed dashboard was a dev tool; app onboarding is `app/onboard/page.tsx` | Legacy/dev | Gate as dev-only or remove after onboarding state machine lands |
-| Old onboarding cards | `components/OnboardingFlow.tsx`, `components/StyleSelectionCard.tsx`, `NewsletterSelectionCard`, related routes | Existing docs already mark pieces deprecated | Legacy/dev | Quarantine behind dev route or delete after Phase 0c canonical onboarding exists |
-| Legacy clarifiers | `/api/onboard/clarify-news-topic`, `/api/onboard/clarify-lesson-topic`, `/api/onboard/generate-lesson-curriculum` | Used by `StyleSelectionCard`, not main `/onboard` chat | Legacy/dev | Keep measured in Phase 0a; remove when dashboard onboarding is removed |
+| Dashboard onboarding | `app/(app)/dashboard/page.tsx` imported `components/OnboardingFlow.tsx` | User confirmed dashboard was a dev tool; app onboarding is `app/onboard/page.tsx` | Cleaned in Phase 0c | Dashboard now redirects unfinished users to `/onboard`; legacy wizard import removed |
+| Old onboarding cards | `components/OnboardingFlow.tsx`, `components/StyleSelectionCard.tsx`, `NewsletterSelectionCard`, related routes | Existing docs already mark pieces deprecated | Cleaned in Phase 0c | Deleted dashboard-era onboarding card components after canonical `/onboard` state machine landed |
+| Legacy clarifiers | `/api/onboard/clarify-news-topic`, `/api/onboard/clarify-lesson-topic`, `/api/onboard/generate-lesson-curriculum` | Used by `StyleSelectionCard`, not main `/onboard` chat | Cleaned in Phase 0c | Deleted with old dashboard onboarding route callers |
+| Legacy sender selection | `/api/onboard/classify-senders`, `/api/onboard/classified-senders`, `/api/onboard/finalize-selections`, `lib/onboard/llm-batch.ts` | Old manual newsletter selection path; current onboarding uses `/api/onboard/scan-inbox` and recommendation cards | Cleaned in Phase 0c | Deleted old sender classification/selection endpoints and batch classifier |
+| Legacy topic preview | `/api/onboard/preview-news-topic-density` and `previewNewsTopicSignal` | Only called by deleted `StyleSelectionCard` | Cleaned in Phase 0c | Deleted preview route and unused relevance-filter schema/path |
 | Duplicate summarization | `lib/digest/summarize-newsletters.ts` and `app/api/digest/generate-summaries/route.ts` | Cron and dev route have different prompts/parsing | Duplicate logic | Make `lib/digest/summarize-newsletters.ts` canonical; convert dev route to call shared module |
 | Dev Gmail fetch route | `app/api/digest/fetch-emails/route.ts` fetched Gmail bodies directly | Dashboard-era endpoint remained user-auth gated in production | Gated in Phase 0c | Production now returns 404 unless `CRON_SECRET` bearer is supplied; decide remove vs. repoint after soak |
 | Backfill start route | `app/api/backfill/start/route.ts` backfilled Gmail metadata directly | Dev/backfill endpoint remained user-auth gated in production | Gated in Phase 0c | Production now returns 404 unless `CRON_SECRET` bearer is supplied; decide remove vs. repoint after soak |
@@ -37,7 +39,7 @@ This ledger tracks stale migrations, antiquated code paths, and outdated product
 
 These are intentionally not removed in Phase 0a:
 
-- Legacy onboarding endpoints, because dashboard/dev tooling still calls them.
+- Legacy onboarding docs, because they preserve rebuild history even after code deletion.
 - Duplicate summarization code, because it may still be useful for dev iteration and needs a canonical replacement.
 - Historical SQL files, because production schema history has not been reconciled yet.
 - `app/api/digest/fetch-emails` and `app/api/backfill/start`, because they are now production-gated while Phase 0c decides whether to delete or repoint them.
