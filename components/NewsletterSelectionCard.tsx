@@ -23,8 +23,6 @@ type NewsletterSelectionCardProps = {
 }
 
 export default function NewsletterSelectionCard({ onFinalized }: NewsletterSelectionCardProps = {}) {
-  console.log("NewsletterSelectionCard rendered, onFinalized:", typeof onFinalized)
-  
   const [senders, setSenders] = useState<Sender[]>([])
   const [localSelections, setLocalSelections] = useState<Map<string, boolean>>(new Map())
   const [loading, setLoading] = useState(true)
@@ -32,11 +30,6 @@ export default function NewsletterSelectionCard({ onFinalized }: NewsletterSelec
   const [error, setError] = useState<string | null>(null)
   const [success, setSuccess] = useState<string | null>(null)
   const [showNoSection, setShowNoSection] = useState(false)
-
-  // Fetch senders on mount
-  useEffect(() => {
-    fetchSenders()
-  }, [])
 
   const fetchSenders = useCallback(async () => {
     setLoading(true)
@@ -76,6 +69,11 @@ export default function NewsletterSelectionCard({ onFinalized }: NewsletterSelec
     }
   }, [])
 
+  // Fetch senders on mount
+  useEffect(() => {
+    fetchSenders()
+  }, [fetchSenders])
+
   const handleToggle = useCallback((senderKey: string) => {
     setLocalSelections(prev => {
       const next = new Map(prev)
@@ -87,9 +85,6 @@ export default function NewsletterSelectionCard({ onFinalized }: NewsletterSelec
   }, [])
 
   const handleFinalize = useCallback(async () => {
-    console.log("handleFinalize called!")
-    console.log("onFinalized prop:", typeof onFinalized, onFinalized)
-    
     setSaving(true)
     setError(null)
     setSuccess(null)
@@ -120,10 +115,7 @@ export default function NewsletterSelectionCard({ onFinalized }: NewsletterSelec
       // Call callback to advance to next step BEFORE refreshing
       // This ensures the step transition happens immediately
       if (onFinalized) {
-        console.log("Calling onFinalized callback")
         onFinalized()
-      } else {
-        console.warn("onFinalized callback is not defined")
       }
       
       // Refresh senders to get updated state (non-blocking)
@@ -140,12 +132,6 @@ export default function NewsletterSelectionCard({ onFinalized }: NewsletterSelec
   const yesSenders = senders.filter(s => s.status === "Yes")
   const greySenders = senders.filter(s => s.status === "Grey")
   const noSenders = senders.filter(s => s.status === "No")
-
-  // Check if any changes were made
-  const hasChanges = senders.some(sender => {
-    const localSelected = localSelections.get(sender.sender_key) ?? false
-    return localSelected !== sender.selected
-  })
 
   return (
     <div className="rounded-2xl border border-white/10 bg-white/5 p-6 text-white space-y-6">

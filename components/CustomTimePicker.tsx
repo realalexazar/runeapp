@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useEffect } from "react"
+import { useState, useEffect, useCallback } from "react"
 
 type CustomTimePickerProps = {
   value: string // Format: "HH:MM" (24-hour)
@@ -14,11 +14,11 @@ export default function CustomTimePicker({
   label
 }: CustomTimePickerProps) {
   // Parse value into hours and minutes (24-hour format)
-  const parseValue = () => {
+  const parseValue = useCallback(() => {
     if (!value) return { hour24: 8, minute: 0 }
     const [h, m] = value.split(':').map(Number)
     return { hour24: h || 8, minute: m || 0 }
-  }
+  }, [value])
 
   const { hour24, minute } = parseValue()
   
@@ -38,7 +38,7 @@ export default function CustomTimePicker({
     setSelectedHour12(h12)
     setSelectedMinute(m)
     setSelectedPeriod(p)
-  }, [value])
+  }, [parseValue])
 
   // Convert 12-hour to 24-hour and call onChange
   const convertAndUpdate = (hour12: number, minute: number, period: 'AM' | 'PM') => {

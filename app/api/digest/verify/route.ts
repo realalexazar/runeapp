@@ -158,7 +158,7 @@ export async function GET() {
       } catch (oauthErr: any) {
         // Token is expired or invalid
         verification.oauth_token_valid = false
-        console.log("OAuth token validation failed:", oauthErr?.message)
+        console.warn("OAuth token validation failed:", oauthErr?.message)
       }
     }
 
@@ -172,7 +172,7 @@ export async function GET() {
     verification.messages_count = messagesCount || 0
 
     // 2. Check newsletter selections
-    const { data: selections, count: selectionsCount } = await supabaseServiceRole
+    const { count: selectionsCount } = await supabaseServiceRole
       .from("user_newsletter_selections")
       .select("sender_key", { count: "exact" })
       .eq("user_id", user.id)

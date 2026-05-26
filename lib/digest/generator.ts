@@ -284,7 +284,6 @@ async function fetchTavilyNews(input: {
             result_count: tavilyResults.length
           }
         })
-        console.log(`[tavily] query="${query}" returned ${tavilyResults.length} results`)
         return tavilyResults.map((result: any) => {
           const rawText = String(result.raw_content || "").trim()
           const snippet = String(result.content || "").trim()
@@ -563,7 +562,6 @@ async function hydrateArticlePreview(
           tier_key: context.tierKey || null
         }
       })
-      console.log(`[hydration] FAIL ${resp.status} ${source}`)
       return { ...article, contentPreview: null }
     }
 
@@ -590,9 +588,6 @@ async function hydrateArticlePreview(
         usable_preview: Boolean(preview && preview.length >= 200)
       }
     })
-    if (!preview || preview.length < 200) {
-      console.log(`[hydration] THIN ${preview?.length || 0}ch ${source}`)
-    }
     return {
       ...article,
       resolvedUrl,
@@ -618,8 +613,6 @@ async function hydrateArticlePreview(
         tier_key: context.tierKey || null
       }
     })
-    const reason = e?.code || e?.cause?.code || "unknown"
-    console.log(`[hydration] ERR ${reason} ${source}`)
     return { ...article, contentPreview: null }
   }
 }
@@ -1328,10 +1321,6 @@ async function fetchNewsArticlesForTier(
   const deduped = deduplicateArticlesCrossProvider(combined)
 
   const skippedGoogle = tavilySubstantiveCount >= MIN_TAVILY_SUBSTANTIVE_TO_SKIP_GOOGLE
-  console.log(
-    `[news-retrieval] tier=${tier.key} tavily=${tavilyArticles.length} substantive=${tavilySubstantiveCount} google=${googleArticles.length}${skippedGoogle ? " (rss skipped)" : ""} deduped=${deduped.length}`
-  )
-
   return {
     query: queries.join(" | "),
     articles: deduped.slice(0, 16),
@@ -1706,8 +1695,6 @@ export async function generateDailyNewsTopics(input: {
           selected: allArticles.length > 0
         }
         retrievalFunnel.push(funnelEntry)
-        console.log(`[news-retrieval] topic="${topic.topic_text}" tier=${tier.key}: ${funnelEntry.raw_count} raw → ${funnelEntry.prefiltered_count} prefiltered (${preFilteredArticles.length >= 3 ? "used" : "bypassed"}) → ${allArticles.length} candidates`)
-
         if (allArticles.length > 0) {
           selectedTier = tier
           selectedQuery = retrieval.query

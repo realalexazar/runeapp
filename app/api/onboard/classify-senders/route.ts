@@ -10,7 +10,7 @@ import { classifyBatch, Candidate } from "@/lib/onboard/llm-batch"
  * Layer 2: Hard rules filter (transaction/discount keywords)
  * Layer 3: LLM classification (batch call with subject lines)
  */
-export async function POST(req: Request) {
+export async function POST(_req: Request) {
   const startTime = Date.now()
   const supabase = await getSupabaseServerClient()
   const { data: { user } } = await supabase.auth.getUser()

@@ -167,7 +167,7 @@ function extractSignal(text: string): { type: "intent" | "recommendation" | null
 
   const truncatedMatch = text.match(/```(?:json)?\s*(\{[\s\S]*)$/)
   if (truncatedMatch) {
-    let jsonStr = truncatedMatch[1].trim()
+    const jsonStr = truncatedMatch[1].trim()
     let depth = 0
     let lastValidEnd = -1
     for (let i = 0; i < jsonStr.length; i++) {

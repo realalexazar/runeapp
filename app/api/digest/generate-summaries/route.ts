@@ -30,8 +30,7 @@ const MIN_CONTENT_LENGTH = 100 // Minimum content length before skipping LLM (sp
  * Reads from digest_items where digest_id IS NULL (temporary storage).
  * Updates content_summary field for each item.
  * 
- * Body: { lookback_days?: number, style?: string, regenerate?: boolean, truncation_limit?: number, batch_size?: number, concurrent_batches?: number, model?: string }
- * - lookback_days: Override (for dev mode)
+ * Body: { style?: string, regenerate?: boolean, truncation_limit?: number, batch_size?: number, concurrent_batches?: number, model?: string }
  * - style: 'morning-brief' | 'deep-read' | 'reference-mode' (defaults to user's config)
  * - regenerate: If true, clear existing summaries and regenerate
  * - truncation_limit: Override default truncation limit
@@ -60,7 +59,6 @@ export async function POST(req: Request) {
     if (!user) return NextResponse.json({ ok: false, error: "Unauthorized" }, { status: 401 })
 
     const body = await req.json().catch(() => ({}))
-    const lookbackDays = body.lookback_days ? parseInt(body.lookback_days) : null
     const styleOverride = body.style || null // For dev mode testing
     const regenerate = body.regenerate === true // If true, clear existing summaries and regenerate
     
@@ -344,7 +342,7 @@ async function summarizeBatch(
   userId: string,
   items: Array<{ id: string; sender_key: string | null; newsletter_name: string | null; subject: string; content: string; links: string[] }>,
   style: string,
-  batchSize: number = BATCH_SIZE,
+  _batchSize: number = BATCH_SIZE,
   concurrentBatches: number = CONCURRENT_BATCHES,
   model: string = "gpt-4o-mini"
 ): Promise<Array<{ item_id: string; summary: string }>> {

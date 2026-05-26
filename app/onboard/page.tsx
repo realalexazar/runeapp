@@ -35,11 +35,6 @@ type RecommendationData = {
   user_facing_summary?: string[]
 }
 
-type IntentData = {
-  wants_inbox_curation?: boolean
-  [key: string]: any
-}
-
 function uid() {
   return Math.random().toString(36).slice(2) + Date.now().toString(36)
 }
@@ -286,7 +281,6 @@ function OnboardFlow() {
   const [typing, setTyping] = useState(false)
 
   const [phase, setPhase] = useState<"conversation" | "gmail_connect" | "scanning" | "recommendation" | "approved">("conversation")
-  const [intentData, setIntentData] = useState<IntentData | null>(null)
   const [recommendationData, setRecommendationData] = useState<RecommendationData | null>(null)
   const [approving, setApproving] = useState(false)
   const [showGreetingPrompt, setShowGreetingPrompt] = useState(false)
@@ -331,8 +325,6 @@ function OnboardFlow() {
             })
           }
         }
-        const savedIntent = sessionStorage.getItem("rune_onboard_intent")
-        if (savedIntent) setIntentData(JSON.parse(savedIntent))
       } catch {}
       setConversationStarted(true)
       setShowSurge(false)
@@ -419,8 +411,6 @@ function OnboardFlow() {
 
       if (data.signal === "intent_ready") {
         const intent = data.intent_data || {}
-        setIntentData(intent)
-
         if (intent.inbox_preferences?.wants_inbox_curation === false) {
           setTimeout(() => injectScanResults(null), 500)
         } else {

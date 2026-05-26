@@ -355,8 +355,6 @@ export async function POST() {
       candidates.push({ address, fromName: data.fromName, count: data.count, subjects: data.subjects })
     }
 
-    console.log(`[scan-inbox] ${senderMap.size} senders → ${candidates.length} candidates (${filteredOut} filtered by cadence/hard-rules)`)
-
     // 6. Layer 3: LLM relevance scoring against user interests
     const { data: profile } = await supabaseServiceRole
       .from("user_profiles")

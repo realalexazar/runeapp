@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useEffect, useCallback } from "react"
+import { useState, useCallback } from "react"
 import ConnectGmailCard from "./ConnectGmailCard"
 import BackfillParseControls from "./BackfillParseControls"
 import NewsletterSelectionCard from "./NewsletterSelectionCard"
@@ -20,8 +20,6 @@ type OnboardingFlowProps = {
 }
 
 export default function OnboardingFlow({ isConnected }: OnboardingFlowProps) {
-  console.log("OnboardingFlow component rendered, isConnected:", isConnected)
-  
   const [onboardingStep, setOnboardingStep] = useState<OnboardingStep>(1)
   const [step2Progress, setStep2Progress] = useState<Step2Progress>({
     // MVP lock: cadence is fixed to daily, so cadence is always "selected".
@@ -35,17 +33,8 @@ export default function OnboardingFlow({ isConnected }: OnboardingFlowProps) {
   // Note: Config check is handled in DashboardPage (server-side)
   // This component only handles the onboarding flow
 
-  // Debug: Log when onboardingStep changes
-  useEffect(() => {
-    console.log("OnboardingFlow: onboardingStep changed to", onboardingStep)
-  }, [onboardingStep])
-
   const handleNewsletterFinalized = useCallback(() => {
-    console.log("OnboardingFlow: handleNewsletterFinalized called")
-    setOnboardingStep((prevStep) => {
-      console.log("OnboardingFlow: Current step:", prevStep, "→ Setting to 2")
-      return 2
-    })
+    setOnboardingStep(2)
   }, [])
 
   const handleCadenceSelected = (cadence: string) => {
