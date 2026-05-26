@@ -274,7 +274,9 @@
 
 ---
 
-## Examples from Current UI
+## Historical UI Examples
+
+These examples describe the visual language from earlier alpha surfaces. The old dashboard onboarding/backfill components have been removed, but the restraint, spacing, and dark UI treatment still inform new onboarding work.
 
 **Connect Gmail Card:**
 - `bg-white/5` card background with `border-white/10`
@@ -290,13 +292,6 @@
 - Scrollable list (`max-h-[500px] overflow-y-auto`)
 - `bg-white/15` "Finalize Selections" button
 - Selected items: `bg-white/15 border border-white/20`
-
-**Backfill/Classify Card:**
-- `bg-white/5` card background
-- Two sections separated by `h-px w-full bg-white/10` divider
-- White headings (`text-lg font-medium text-white`)
-- `bg-white/15` action buttons
-- Muted status text (`text-white/70 text-sm`)
 
 ---
 

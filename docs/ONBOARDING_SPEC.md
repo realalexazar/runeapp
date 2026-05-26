@@ -1,8 +1,8 @@
 # Onboarding Spec
 
 Last updated: 2026-05-26
-Spec version: 1.1
-Status: draft for human approval before Phase 0c implementation
+Spec version: 1.2
+Status: approved for Phase 0c implementation
 File: `docs/ONBOARDING_SPEC.md`
 
 This spec defines the Phase 0c onboarding product spine. It is intentionally build-facing: frontend behavior, backend state, persistence, validation, and telemetry live in one contract so the implementation does not drift.
@@ -592,7 +592,7 @@ recommendation_ready with recoverable message
 | User rejects recommendation | Return to chat with current cards summarized | Continue conversation and regenerate |
 | Minimum intent gate fails | Chat nudge for missing fields | Ask one focused question |
 | Refinement patch fails | Keep prior cards visible | Show recoverable message and allow another instruction |
-| Approval commit fails | Keep approved draft visible | Retry commit; do not lose edits |
+| Approval commit fails | Keep approved draft visible and emit `approval_failed` | Retry commit; do not lose edits |
 
 Failure UI should avoid dead ends. Every failure state has a primary recovery action and a secondary escape action.
 

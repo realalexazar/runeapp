@@ -1,7 +1,6 @@
 import { getSupabaseServerClient } from "@/lib/supabase/server"
 import { supabaseServiceRole } from "@/lib/supabase/service"
 import DigestStatusCard from "@/components/DigestStatusCard"
-import DevModePanel from "@/components/DevModePanel"
 import { redirect } from "next/navigation"
 
 export default async function DashboardPage() {
@@ -47,7 +46,6 @@ export default async function DashboardPage() {
         </div>
         <div className="space-y-6">
           <DigestStatusCard />
-          {process.env.NODE_ENV !== 'production' && <DevModePanel />}
         </div>
       </div>
     </section>

@@ -1,6 +1,6 @@
 # Phase 0a External API Inventory
 
-Last updated: 2026-05-24
+Last updated: 2026-05-26
 
 This inventory covers paid or quota-sensitive non-LLM calls. Phase 0a runtime telemetry is wired for the production Tavily, Google News RSS, web article hydration, Gmail, and Google OAuth paths. Metadata is intentionally sanitized: no OAuth tokens, message ids, subjects, sender addresses, private email bodies, or raw Gmail queries.
 
@@ -26,14 +26,14 @@ Runtime table: `public.external_api_call_telemetry`
 
 Baseline query: `docs/phase0a_external_api_baseline.sql`
 
-## Static Inventory Not Yet Wired
+## Retired Static Inventory
 
-| File / function | Provider | Endpoint/API | Purpose | Notes |
-| --- | --- | --- | --- | --- |
-| `app/api/digest/fetch-emails/route.ts` | Gmail | Gmail API | Dev/dashboard email fetch path | Dev path; classify before cleanup |
-| `app/api/backfill/start/route.ts` | Gmail | Gmail API | Backfill fetch path | Dev/backfill path; classify before cleanup |
+| File / function | Provider | Endpoint/API | Phase 0c outcome |
+| --- | --- | --- | --- |
+| `app/api/digest/fetch-emails/route.ts` | Gmail | Gmail API | Deleted after `DevModePanel` removal; shared newsletter fetching remains in `lib/digest/fetch-newsletters.ts`. |
+| `app/api/backfill/start/route.ts` | Gmail | Gmail API | Deleted after dashboard-era backfill cleanup; onboarding inbox discovery remains in `/api/onboard/scan-inbox`. |
 
 ## Follow-Up
 
-- Decide whether `app/api/digest/fetch-emails` and `app/api/backfill/start` remain dev-only or should be removed/repointed to the shared newsletter fetch path.
+- Keep removed dashboard-era fetch/backfill routes absent unless a new admin surface is designed.
 - Move all provider calls behind provider interfaces in Phase 2, after Phase 0b schemas and Phase 0c state are stable.

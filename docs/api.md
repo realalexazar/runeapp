@@ -1,92 +1,64 @@
-# API Reference (current)
+# API Reference
 
-This document describes the implemented endpoints and their behavior. All routes require a valid Supabase session (user must be logged in) unless noted otherwise.
+Last updated: 2026-05-26
 
-## Auth
-- Supabase email/password and Google via the Connect flow
-- Session is stored via cookies; server routes read it through `@supabase/ssr`
+This document describes the current implemented HTTP surface. User routes require a valid Supabase session unless a route explicitly says otherwise.
 
----
+## Auth And Connect
 
-## POST /api/backfill/start
-Start a bounded backfill of recent Gmail messages for the authenticated user (Promotions/Updates, last ~90 days, initial cap of 20 for dev).
+| Route | Method | Auth | Purpose |
+| --- | --- | --- | --- |
+| `/auth/callback` | GET | Supabase OAuth callback | Exchanges a Supabase auth code for a session and redirects to onboarding. |
+| `/api/connect/gmail/start` | GET | Supabase session | Starts Google OAuth for Gmail readonly access. |
+| `/api/connect/gmail/callback` | GET | OAuth state cookie | Exchanges Google OAuth code, encrypts refresh token, and stores the connected account. |
 
-- Auth: required
-- Request body: none
-- Response (200):
-```json
-{ "ok": true, "messages_scanned": number, "inserted": number }
-```
-- Errors: 401 (no session), 400 (no connected Google account), 500 (unexpected)
-- Side effects:
-  - Lists Gmail message IDs via Google API
-  - For each id: fetches raw MIME, uploads to Storage `emails-raw/<USER_ID>/<MESSAGE_ID>.eml`
-  - Upserts into `messages_raw` with unique `(user_id, provider_message_id)` (idempotent)
+## Onboarding
 
-Notes:
-- Safe to re-run (idempotent). It will not create duplicates.
-- Pagination/throttling will be expanded; currently capped to 20 for fast iteration.
+| Route | Method | Purpose |
+| --- | --- | --- |
+| `/api/onboard/state` | GET | Returns the server-owned onboarding snapshot for the current user. |
+| `/api/onboard/chat` | POST | Persists a chat turn, updates structured intent, and returns the updated snapshot. |
+| `/api/onboard/build` | POST | Runs the minimum intent gate for the user-triggered Build my Rune action. |
+| `/api/onboard/inbox-preference` | POST | Persists `wanted`, `not_wanted`, or `skipped` inbox preference. |
+| `/api/onboard/scan-inbox` | POST | Scans Gmail metadata for recurring senders and persists a scan artifact. |
+| `/api/onboard/recommend` | POST | Generates and persists typed recommendation cards from current intent and scan context. |
+| `/api/onboard/refine` | POST | Applies a schema-validated natural-language patch to recommendation cards. |
+| `/api/onboard/cards/[cardId]` | PATCH | Applies a direct card edit with stale-version checks. |
+| `/api/onboard/approve` | POST | Commits one validated onboarding config into digest config, topics, lessons, and newsletter selections. |
+| `/api/onboard/rerun-setup` | POST | Resets onboarding/config state so the user can re-run setup. |
+| `/api/onboard/backfill-curricula` | POST | Admin-style repair helper for lesson topics missing curriculum plans. |
 
----
+## Digest
 
-## POST /api/parse/run
-Parse and sanitize raw emails that don’t yet have a cleaned record.
+| Route | Method | Purpose |
+| --- | --- | --- |
+| `/api/digest/config` | GET | Returns the current user's digest configuration. |
+| `/api/digest/config` | POST | Saves digest configuration and maps topics into durable topic records. |
+| `/api/digest/verify` | GET | Verifies digest readiness: config, Gmail status, selected senders, and content prerequisites. |
+| `/api/digest/generate` | POST | Runs end-to-end digest generation and optional send for the current user/manual trigger. |
+| `/api/digest/generate-summaries` | POST | Dev/manual summary generation route backed by shared newsletter summarization code. |
+| `/api/digest/generate-daily-news-topics` | POST | Dev/manual route for daily news topic generation. |
+| `/api/digest/generate-daily-lessons` | POST | Dev/manual route for daily lesson generation. |
+| `/api/digest/format` | POST | Formats generated modules into a persisted HTML/text digest. |
+| `/api/digest/send` | POST | Sends a formatted digest through Resend. |
+| `/api/digest/lesson-state` | GET | Reads lesson progress state for a topic. |
+| `/api/digest/lesson-state` | POST | Pauses, resumes, completes, or switches a lesson topic. |
 
-- Auth: required
-- Request body: none
-- Response (200):
-```json
-{ "ok": true, "parsed": number }
-```
-- Errors: 401 (no session), 500 (unexpected)
-- Side effects:
-  - Downloads `.eml` from `emails-raw` for the user
-  - Parses MIME (headers/HTML/text)
-  - Sanitizes HTML; derives plaintext (fallbacks to `html-to-text`)
-  - Detects newsletter via high-signal rules (e.g., List-Id, List-Unsubscribe, unsubscribe link, bulk precedence)
-  - Uploads sanitized files to `emails-clean/<USER_ID>/<RAW_ID>.{html,txt}`
-  - Upserts into `messages_clean` with unique `(raw_id)`; stores `is_newsletter` and `signals` JSON
+## Cron, Export, Health
 
-Notes:
-- Also idempotent. If a cleaned row exists, the message is skipped.
+| Route | Method | Auth | Purpose |
+| --- | --- | --- | --- |
+| `/api/cron/generate-digests` | GET | `CRON_SECRET` bearer | Scheduled digest generation and delivery. |
+| `/api/export/features` | GET | Supabase session | Debug CSV export for inbox analysis and digest data. |
+| `/health` | GET | Public | Lightweight health check returning `{ "status": "ok" }`. |
 
----
+## Removed Phase 0c Dev Routes
 
-## Data Model (current)
+The dashboard-era development routes below were removed during Phase 0c cleanup and should remain absent unless a new admin surface is designed:
 
-### messages_raw
-- `id` bigint PK
-- `user_id` uuid
-- `provider` text ("google")
-- `provider_message_id` text
-- `received_at` timestamptz
-- `raw_url` text (Storage path)
-- `sha256` text
-- Unique: `(user_id, provider_message_id)`
+- `/api/digest/fetch-emails`
+- `/api/backfill/start`
+- `/api/backfill/progress`
+- `/api/parse/progress`
 
-### messages_clean
-- `id` bigint PK
-- `user_id` uuid
-- `raw_id` bigint (FK -> messages_raw.id)
-- `html_url` text, `text_url` text
-- `is_newsletter` boolean
-- `signals` jsonb (optional)
-- Unique: `(raw_id)`
-
-### Storage
-- `emails-raw` (private): raw MIME `.eml`
-- `emails-clean` (private): sanitized `.html` and `.txt`
-
----
-
-## Planned Next Endpoints
-- `GET /api/newsletters?limit=…` — returns detected newsletters grouped by sender/list-id with counts and latest metadata for UI review
-- `POST /api/backfill/start` → full pagination + throttling
-- `POST /api/parse/run` → enqueue-per-item with job tracking (optional workerization)
-
----
-
-## Operational notes
-- All writes use upserts + unique constraints for idempotency
-- Keep buckets private; service-role client performs reads/writes server-side
-- Errors are logged server-side; UI can be expanded with toasts/job status
+Newsletter fetching now belongs to the shared digest service path in `lib/digest/fetch-newsletters.ts`, and onboarding inbox discovery belongs to `/api/onboard/scan-inbox`.

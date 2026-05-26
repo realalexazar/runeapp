@@ -57,7 +57,7 @@ Scan every API route for the same pattern: operations that `console.error` and c
 - `app/api/onboard/recommend/route.ts` — check enrichment failures
 - `app/api/onboard/scan-inbox/route.ts` — check Gmail API error paths
 - `app/api/cron/generate-digests/route.ts` — check per-user error isolation
-- `app/api/digest/fetch-emails/route.ts` — check Gmail token expiry handling
+- `lib/digest/fetch-newsletters.ts` — check Gmail token expiry handling in the canonical newsletter fetch path
 - `lib/digest/fetch-newsletters.ts` — new file, needs review
 - `lib/digest/summarize-newsletters.ts` — new file, needs review
 
@@ -77,7 +77,7 @@ Scan every API route for the same pattern: operations that `console.error` and c
 - Auth dialog keyboard behavior on various mobile browsers
 
 ### Priority 6: Production Hardening
-- Remove `force=true` and backfill endpoints before public launch (or add admin auth)
+- Remove `force=true` before public launch (or add admin auth)
 - Set up Vercel Cron for automated daily digest delivery
 - Add rate limiting on public API routes
 - Review Supabase RLS policies for all tables

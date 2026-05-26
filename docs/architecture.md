@@ -1,5 +1,7 @@
 # Rune 1.5 — Architecture Document
 
+> Historical alpha snapshot. This document preserves the Rune 1.5 architecture for context and may mention dashboard-era routes/components that Phase 0c has since removed. Use `docs/REBUILD_PLAN.md`, `docs/ONBOARDING_SPEC.md`, and `docs/api.md` as the current build contracts.
+
 ## 1. What Rune Is
 
 Rune is a personalized daily intelligence agent. Users onboard via a conversational chat with Claude, optionally connect their Gmail, and receive a curated daily email digest each morning. Rune has three core capabilities:

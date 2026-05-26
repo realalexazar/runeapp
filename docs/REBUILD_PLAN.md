@@ -1,7 +1,7 @@
 # Rune Rebuild Plan
 
 Last updated: 2026-05-26
-Version: 1.16
+Version: 1.19
 File: `docs/REBUILD_PLAN.md`
 
 This document is the source of truth for the Rune rebuild. It pins down the sequence, scope, exit criteria, and architectural direction so the team does not keep re-litigating the plan in chat.
@@ -545,9 +545,9 @@ Acceptance criteria:
 2. Populate active alpha user count and average scheduled Rune runs/day from production Supabase, or record an alpha-volume waiver.
 3. Monitor Phase 0b validation failures and cost deltas for the newly migrated onboarding chat and preview relevance call sites.
 4. Smoke-test the production onboarding path now that `supabase/migrations/20260526120000_onboarding_state_machine.sql` is applied.
-5. Decide whether `app/api/digest/fetch-emails` and `app/api/backfill/start` should be removed or repointed to shared modules after their production gate has soaked.
-6. Decide whether Google News RSS/web hydration metadata should keep raw public queries or move to hashed query labels in Phase 0c.
-7. Re-run an authenticated onboarding flow against production and capture any remaining Phase 0c bugs before drafting the exit memo.
+5. Decide whether Google News RSS/web hydration metadata should keep raw public queries or move to hashed query labels in Phase 0c.
+6. Re-run an authenticated onboarding flow against production and capture any remaining Phase 0c bugs before drafting the exit memo.
+7. Draft the Phase 0c Exit Memo only after authenticated onboarding, approval, and dashboard redirect behavior are smoke-tested against production.
 
 ## Decision Log
 
@@ -579,6 +579,7 @@ The plan is changing quickly because the rebuild is active. Going forward, group
 
 | Version | Date | Changes |
 | --- | --- | --- |
+| 1.19 | 2026-05-26 | Removed remaining dashboard-era dev routes and docs: deleted `DevModePanel`, `/api/digest/fetch-emails`, `/api/backfill/start`, `/api/backfill/progress`, `/api/parse/progress`, and refreshed the active README/API references. |
 | 1.18 | 2026-05-26 | Cleaned dashboard-era onboarding drift: dashboard now redirects incomplete users to `/onboard`; deleted old onboarding card components, legacy clarifier/classification/finalize routes, old topic preview route, and the deprecated sender batch classifier. |
 | 1.17 | 2026-05-26 | Continued Phase 0c after production migration: added editable server-backed recommendation cards, stale-version checks for direct edits, and `/api/onboard/refine` for schema-validated natural-language refinement patches. |
 | 1.16 | 2026-05-26 | Started Phase 0c implementation: added onboarding state-machine migration, server snapshot/state helpers, state/build/inbox/card APIs, snapshot hydration in `/onboard`, scan/recommend/approve state hooks, Gmail connect telemetry hooks, and production gating for dev Gmail routes. |
