@@ -1,7 +1,7 @@
 # Rune Rebuild Plan
 
 Last updated: 2026-05-26
-Version: 1.12
+Version: 1.13
 File: `docs/REBUILD_PLAN.md`
 
 This document is the source of truth for the Rune rebuild. It pins down the sequence, scope, exit criteria, and architectural direction so the team does not keep re-litigating the plan in chat.
@@ -278,6 +278,7 @@ This phase is stabilization only. Do not add new product capabilities here.
 
 Scope:
 
+- `docs/ONBOARDING_SPEC.md` as the implementation contract.
 - Server-side onboarding state machine.
 - Persistent inbox scan artifacts.
 - Durable typed recommendation config.
@@ -529,11 +530,11 @@ Acceptance criteria:
 
 ## Immediate Next Tasks
 
-1. Monitor Phase 0b validation failures and cost deltas for the newly migrated onboarding chat and preview relevance call sites.
-2. Draft the Phase 0b Exit Memo after the post-migration telemetry window is reviewed or explicitly waived.
-3. Classify `app/api/digest/fetch-emails` and `app/api/backfill/start` as either dev-only routes to gate/remove or production routes to repoint to shared modules during Phase 0c.
-4. Decide whether Google News RSS/web hydration metadata should keep raw public queries or move to hashed query labels in Phase 0c.
-5. Start Phase 0c only after human owner sign-off on the onboarding/product spine direction.
+1. Review and approve `docs/ONBOARDING_SPEC.md` before Phase 0c implementation begins.
+2. Monitor Phase 0b validation failures and cost deltas for the newly migrated onboarding chat and preview relevance call sites.
+3. Draft the Phase 0b Exit Memo after the post-migration telemetry window is reviewed or explicitly waived.
+4. Classify `app/api/digest/fetch-emails` and `app/api/backfill/start` as either dev-only routes to gate/remove or production routes to repoint to shared modules during Phase 0c.
+5. Decide whether Google News RSS/web hydration metadata should keep raw public queries or move to hashed query labels in Phase 0c.
 
 ## Decision Log
 
@@ -561,6 +562,7 @@ Acceptance criteria:
 
 | Version | Date | Changes |
 | --- | --- | --- |
+| 1.13 | 2026-05-26 | Added `docs/ONBOARDING_SPEC.md` as the Phase 0c onboarding/product spine implementation contract. |
 | 1.12 | 2026-05-26 | Completed Phase 0b code migration for production-relevant LLM call sites: onboarding chat turns now return schema-validated structured messages, preview news relevance uses schema validation, and dead legacy news synthesis was removed. |
 | 1.11 | 2026-05-25 | Migrated onboarding technical config generation onto the Phase 0b gateway with a schema-validated slot allocation contract. |
 | 1.10 | 2026-05-25 | Migrated sender batch classification from direct OpenAI fetch and regex parsing onto the Phase 0b gateway with schema validation. |
