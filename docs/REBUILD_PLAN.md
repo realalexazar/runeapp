@@ -1,7 +1,7 @@
 # Rune Rebuild Plan
 
 Last updated: 2026-05-26
-Version: 1.14
+Version: 1.15
 File: `docs/REBUILD_PLAN.md`
 
 This document is the source of truth for the Rune rebuild. It pins down the sequence, scope, exit criteria, and architectural direction so the team does not keep re-litigating the plan in chat.
@@ -59,7 +59,18 @@ The rebuild should not start by adding graph infrastructure. It starts by making
 
 ## Current Alpha State
 
-Current alpha volume is not yet recorded in this plan. Phase 0a must document active user count, average Rune runs per day, and expected baseline sample size in its Phase Exit Memo. If alpha volume is too low to meet the default 5-day/3-user baseline, the waiver must be recorded in the Decision Log with date and rationale.
+Current repo evidence includes one controlled production snapshot, not a complete alpha baseline.
+
+| Field | Current known value | Source |
+| --- | --- | --- |
+| Controlled production user | `0c8ed9ca-7734-4d48-8cf4-7fadb778b775` | `docs/phase0a_snapshot_2026-05-24.md` |
+| Controlled module run volume | 2 news items, 2 lesson items; no digest email sent | `docs/phase0a_snapshot_2026-05-24.md` |
+| Controlled LLM cost | `$0.140374` across 3 LLM calls | `docs/phase0a_snapshot_2026-05-24.md` |
+| Active alpha user count | Unknown from repo artifacts | Populate from production Supabase or Phase 0a Exit Memo |
+| Average scheduled Rune runs/day | Unknown from repo artifacts | Populate from production Supabase or Phase 0a Exit Memo |
+| 5-day/3-user baseline | Not yet recorded | Requires production data or explicit human waiver |
+
+Phase 0a snapshots exist, and `docs/phase-exits/phase0a_exit_memo.md` now records that the full alpha-volume baseline is still pending. If alpha volume is too low to meet the default 5-day/3-user baseline, the waiver must be recorded in the Decision Log or Phase Exit Memo with date and rationale.
 
 ## Non-Goals
 
@@ -74,14 +85,14 @@ These are intentionally out of scope until the relevant phase says otherwise.
 
 ## Phase Overview
 
-| Phase | Owner | Objective | Primary Output | Exit Criteria |
-| --- | --- | --- | --- | --- |
-| 0a | Grok ships, GPT reviews completeness | Measure existing system | Static LLM/external API inventory plus runtime telemetry | Every LLM/search call site is mapped and telemetry records real runs |
-| 0b | Grok ships, GPT reviews contracts | Enforce structured LLM contracts | LLM gateway with cost logging and Zod validation | Call sites migrate one by one with schema fixtures and no cost regression |
-| 0c | Grok ships, GPT reviews architecture | Stabilize product spine | Server-side onboarding state and one digest pipeline | Onboarding and digest flows are durable, gated, and testable |
-| 1 | GPT leads interface design, Grok implements | Define graph domain APIs | Graph-facing application interfaces backed by Postgres | Product code depends on graph APIs, not graph database details |
-| 2 | Shared | Rebuild intelligence layer | Search providers, query decomposition, cache, signal classifier | Retrieval and ranking are modular, measured, and fallback-capable |
-| 3 | Shared, benchmark-driven | Commit graph infra and continuity | AGE/Neo4j/relational benchmark, memory, credibility | Real access patterns determine graph storage choice |
+| Phase | Status | Owner | Objective | Primary Output | Exit Criteria |
+| --- | --- | --- | --- | --- | --- |
+| 0a | Instrumentation complete; full real-traffic baseline pending or waiver needed | Grok ships, GPT reviews completeness | Measure existing system | Static LLM/external API inventory plus runtime telemetry | Every LLM/search call site is mapped and telemetry records real runs |
+| 0b | Implementation complete; exit pending telemetry review, waiver decisions, and human sign-off | Grok ships, GPT reviews contracts | Enforce structured LLM contracts | LLM gateway with cost logging and Zod validation | Call sites migrate one by one with schema fixtures and no cost regression |
+| 0c | Spec v1.1 drafted; implementation not started | Grok ships, GPT reviews architecture | Stabilize product spine | Server-side onboarding state and one digest pipeline | Onboarding and digest flows are durable, gated, and testable |
+| 1 | Not started | GPT leads interface design, Grok implements | Define graph domain APIs | Graph-facing application interfaces backed by Postgres | Product code depends on graph APIs, not graph database details |
+| 2 | Not started | Shared | Rebuild intelligence layer | Search providers, query decomposition, cache, signal classifier | Retrieval and ranking are modular, measured, and fallback-capable |
+| 3 | Not started | Shared, benchmark-driven | Commit graph infra and continuity | AGE/Neo4j/relational benchmark, memory, credibility | Real access patterns determine graph storage choice |
 
 ## Roles
 
@@ -530,11 +541,12 @@ Acceptance criteria:
 
 ## Immediate Next Tasks
 
-1. Review and approve `docs/ONBOARDING_SPEC.md` before Phase 0c implementation begins.
-2. Monitor Phase 0b validation failures and cost deltas for the newly migrated onboarding chat and preview relevance call sites.
-3. Draft the Phase 0b Exit Memo after the post-migration telemetry window is reviewed or explicitly waived.
-4. Classify `app/api/digest/fetch-emails` and `app/api/backfill/start` as either dev-only routes to gate/remove or production routes to repoint to shared modules during Phase 0c.
-5. Decide whether Google News RSS/web hydration metadata should keep raw public queries or move to hashed query labels in Phase 0c.
+1. Human owner reviews `docs/phase-exits/phase0a_exit_memo.md` and `docs/phase-exits/phase0b_exit_memo.md`, then either signs off, requests production telemetry, or records explicit waivers.
+2. Populate active alpha user count and average scheduled Rune runs/day from production Supabase, or record an alpha-volume waiver.
+3. Review and approve `docs/ONBOARDING_SPEC.md` v1.1 before Phase 0c implementation begins.
+4. Monitor Phase 0b validation failures and cost deltas for the newly migrated onboarding chat and preview relevance call sites.
+5. Classify `app/api/digest/fetch-emails` and `app/api/backfill/start` as either dev-only routes to gate/remove or production routes to repoint to shared modules during Phase 0c.
+6. Decide whether Google News RSS/web hydration metadata should keep raw public queries or move to hashed query labels in Phase 0c.
 
 ## Decision Log
 
@@ -547,21 +559,26 @@ Acceptance criteria:
 | No Phase 0c feature expansion | Locked | Stabilization must stay scoped |
 | Gmail/OAuth telemetry must be privacy-minimal | Locked | Measure quota, latency, and failure rates without storing message ids, subjects, sender addresses, OAuth tokens, private bodies, or raw Gmail queries |
 | Phase 0b migrations start with low-risk call sites | Locked | Build confidence in the gateway before touching expensive or user-visible synthesis paths |
+| Phase exits require written evidence or explicit waiver | Locked | Phase 0a/0b showed that implementation can outpace baseline data; the memo is the checkpoint |
 
 ## Open Questions
 
-1. What is the current cost per complete Rune run by call site?
+1. What is the current cost per complete scheduled/emailed Rune run by call site? The controlled 2026-05-24 module snapshot was `$0.140374`, but that is not a complete real-traffic baseline.
 2. Which current LLM outputs are most failure-prone?
-3. What minimum validation schema is needed for each existing call site?
-4. How should slots map to news topics, inbox curation, and lessons long term?
-5. What is the cost threshold per run and per user per month?
-6. What similarity threshold makes topic cache reuse safe?
-7. What source providers are legally and economically acceptable for X, Reddit, LinkedIn, and paywalled sources?
+3. How should slots map to news topics, inbox curation, and lessons long term?
+4. What is the cost threshold per run and per user per month?
+5. What similarity threshold makes topic cache reuse safe?
+6. What source providers are legally and economically acceptable for X, Reddit, LinkedIn, and paywalled sources?
+
+## Document Maintenance
+
+The plan is changing quickly because the rebuild is active. Going forward, group small wording-only updates into milestone versions where practical. As Phase 0c starts, move completed Phase 0a/0b implementation detail into a completed-phases appendix or separate exit memos so the active plan stays readable.
 
 ## Change Log
 
 | Version | Date | Changes |
 | --- | --- | --- |
+| 1.15 | 2026-05-26 | Added phase statuses, populated current alpha state from the controlled Phase 0a snapshot, added Phase 0a/0b exit memo follow-through, clarified the remaining real-traffic cost baseline question, and added document-maintenance guidance. |
 | 1.14 | 2026-05-26 | Tightened `docs/ONBOARDING_SPEC.md` to v1.1 with card status rules, recommendation versioning, conversation summary generation, mutation response contracts, refinement gate validation, telemetry debounce, abandonment semantics, and accessibility/initial-state notes. |
 | 1.13 | 2026-05-26 | Added `docs/ONBOARDING_SPEC.md` as the Phase 0c onboarding/product spine implementation contract. |
 | 1.12 | 2026-05-26 | Completed Phase 0b code migration for production-relevant LLM call sites: onboarding chat turns now return schema-validated structured messages, preview news relevance uses schema validation, and dead legacy news synthesis was removed. |
