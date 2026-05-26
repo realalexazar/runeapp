@@ -22,6 +22,8 @@ This ledger tracks stale migrations, antiquated code paths, and outdated product
 | Old onboarding cards | `components/OnboardingFlow.tsx`, `components/StyleSelectionCard.tsx`, `NewsletterSelectionCard`, related routes | Existing docs already mark pieces deprecated | Legacy/dev | Quarantine behind dev route or delete after Phase 0c canonical onboarding exists |
 | Legacy clarifiers | `/api/onboard/clarify-news-topic`, `/api/onboard/clarify-lesson-topic`, `/api/onboard/generate-lesson-curriculum` | Used by `StyleSelectionCard`, not main `/onboard` chat | Legacy/dev | Keep measured in Phase 0a; remove when dashboard onboarding is removed |
 | Duplicate summarization | `lib/digest/summarize-newsletters.ts` and `app/api/digest/generate-summaries/route.ts` | Cron and dev route have different prompts/parsing | Duplicate logic | Make `lib/digest/summarize-newsletters.ts` canonical; convert dev route to call shared module |
+| Dev Gmail fetch route | `app/api/digest/fetch-emails/route.ts` fetched Gmail bodies directly | Dashboard-era endpoint remained user-auth gated in production | Gated in Phase 0c | Production now returns 404 unless `CRON_SECRET` bearer is supplied; decide remove vs. repoint after soak |
+| Backfill start route | `app/api/backfill/start/route.ts` backfilled Gmail metadata directly | Dev/backfill endpoint remained user-auth gated in production | Gated in Phase 0c | Production now returns 404 unless `CRON_SECRET` bearer is supplied; decide remove vs. repoint after soak |
 | News generation dead weight | `_synthesizeNewsBrief` in `lib/digest/generator.ts` | `rg` showed no production callers | Cleaned | Removed the unused legacy synthesis path; current production news uses `unifiedFilterAndSynthesize` |
 | LLM batch bypass | `lib/onboard/llm-batch.ts` directly fetched OpenAI | It bypassed retry/OpenRouter wrapper | Cleaned | Routed through the Phase 0b LLM gateway with `SenderClassificationBatch` schema validation |
 | Anthropic fallback model | `lib/anthropic/chat.ts` fallback now uses `claude-haiku-4-5` | Previous exact fallback ID looked stale; Anthropic's Haiku page says to use `claude-haiku-4-5` | Cleaned in Phase 0a | Reconfirm during Phase 0b gateway migration |
@@ -38,3 +40,4 @@ These are intentionally not removed in Phase 0a:
 - Legacy onboarding endpoints, because dashboard/dev tooling still calls them.
 - Duplicate summarization code, because it may still be useful for dev iteration and needs a canonical replacement.
 - Historical SQL files, because production schema history has not been reconciled yet.
+- `app/api/digest/fetch-emails` and `app/api/backfill/start`, because they are now production-gated while Phase 0c decides whether to delete or repoint them.

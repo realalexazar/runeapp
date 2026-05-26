@@ -9,6 +9,7 @@ import {
   getExternalApiStatusCode,
   recordExternalApiCall,
 } from "@/lib/ai/external-api-telemetry";
+import { setGmailStatus } from "@/lib/onboard/state";
 
 export async function GET(request: Request) {
   const { searchParams, origin } = new URL(request.url);
@@ -145,6 +146,8 @@ export async function GET(request: Request) {
       throw upsertError;
     }
 
+    await setGmailStatus(user.id, "connected");
+
     // Non-blocking initialization of system_state. Table schemas can differ.
     const { error: systemStateError } = await supabaseServiceRole
       .from("system_state")
@@ -160,6 +163,9 @@ export async function GET(request: Request) {
     return NextResponse.redirect(`${origin}${next}`);
   } catch (error) {
     console.error("Error during Google OAuth callback:", error);
+    await setGmailStatus(user.id, "failed").catch((stateError) => {
+      console.warn("Failed to record Gmail onboarding failure:", stateError);
+    });
     return NextResponse.redirect(`${origin}/connect/error?message=oauth_failed`);
   }
 }

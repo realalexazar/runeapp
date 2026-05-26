@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server"
 import { getSupabaseServerClient } from "@/lib/supabase/server"
 import { supabaseServiceRole } from "@/lib/supabase/service"
+import { buildOnboardingSnapshot, persistRecommendationVersion } from "@/lib/onboard/state"
 
 /**
  * POST /api/onboard/recommend
@@ -74,9 +75,12 @@ export async function POST(req: Request) {
       })
       .eq("user_id", user.id)
 
+    await persistRecommendationVersion(user.id, assembledConfig)
+
     return NextResponse.json({
       ok: true,
       config: assembledConfig,
+      snapshot: await buildOnboardingSnapshot(user.id),
     })
   } catch (e: any) {
     console.error("Error storing recommendation:", e)

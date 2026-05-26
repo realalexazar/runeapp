@@ -1,7 +1,7 @@
 # Rune Rebuild Plan
 
 Last updated: 2026-05-26
-Version: 1.15
+Version: 1.16
 File: `docs/REBUILD_PLAN.md`
 
 This document is the source of truth for the Rune rebuild. It pins down the sequence, scope, exit criteria, and architectural direction so the team does not keep re-litigating the plan in chat.
@@ -89,7 +89,7 @@ These are intentionally out of scope until the relevant phase says otherwise.
 | --- | --- | --- | --- | --- | --- |
 | 0a | Instrumentation complete; full real-traffic baseline pending or waiver needed | Grok ships, GPT reviews completeness | Measure existing system | Static LLM/external API inventory plus runtime telemetry | Every LLM/search call site is mapped and telemetry records real runs |
 | 0b | Implementation complete; exit pending telemetry review, waiver decisions, and human sign-off | Grok ships, GPT reviews contracts | Enforce structured LLM contracts | LLM gateway with cost logging and Zod validation | Call sites migrate one by one with schema fixtures and no cost regression |
-| 0c | Spec v1.1 drafted; implementation not started | Grok ships, GPT reviews architecture | Stabilize product spine | Server-side onboarding state and one digest pipeline | Onboarding and digest flows are durable, gated, and testable |
+| 0c | In progress; state-machine foundation and dev-route gating started | Grok ships, GPT reviews architecture | Stabilize product spine | Server-side onboarding state and one digest pipeline | Onboarding and digest flows are durable, gated, and testable |
 | 1 | Not started | GPT leads interface design, Grok implements | Define graph domain APIs | Graph-facing application interfaces backed by Postgres | Product code depends on graph APIs, not graph database details |
 | 2 | Not started | Shared | Rebuild intelligence layer | Search providers, query decomposition, cache, signal classifier | Retrieval and ranking are modular, measured, and fallback-capable |
 | 3 | Not started | Shared, benchmark-driven | Commit graph infra and continuity | AGE/Neo4j/relational benchmark, memory, credibility | Real access patterns determine graph storage choice |
@@ -543,10 +543,11 @@ Acceptance criteria:
 
 1. Human owner reviews `docs/phase-exits/phase0a_exit_memo.md` and `docs/phase-exits/phase0b_exit_memo.md`, then either signs off, requests production telemetry, or records explicit waivers.
 2. Populate active alpha user count and average scheduled Rune runs/day from production Supabase, or record an alpha-volume waiver.
-3. Review and approve `docs/ONBOARDING_SPEC.md` v1.1 before Phase 0c implementation begins.
-4. Monitor Phase 0b validation failures and cost deltas for the newly migrated onboarding chat and preview relevance call sites.
-5. Classify `app/api/digest/fetch-emails` and `app/api/backfill/start` as either dev-only routes to gate/remove or production routes to repoint to shared modules during Phase 0c.
-6. Decide whether Google News RSS/web hydration metadata should keep raw public queries or move to hashed query labels in Phase 0c.
+3. Monitor Phase 0b validation failures and cost deltas for the newly migrated onboarding chat and preview relevance call sites.
+4. Apply `supabase/migrations/20260526120000_onboarding_state_machine.sql` to production before relying on the new state tables as the canonical path.
+5. Finish Phase 0c frontend card editing and natural-language refinement against `docs/ONBOARDING_SPEC.md` v1.1.
+6. Decide whether `app/api/digest/fetch-emails` and `app/api/backfill/start` should be removed or repointed to shared modules after their production gate has soaked.
+7. Decide whether Google News RSS/web hydration metadata should keep raw public queries or move to hashed query labels in Phase 0c.
 
 ## Decision Log
 
@@ -578,6 +579,7 @@ The plan is changing quickly because the rebuild is active. Going forward, group
 
 | Version | Date | Changes |
 | --- | --- | --- |
+| 1.16 | 2026-05-26 | Started Phase 0c implementation: added onboarding state-machine migration, server snapshot/state helpers, state/build/inbox/card APIs, snapshot hydration in `/onboard`, scan/recommend/approve state hooks, Gmail connect telemetry hooks, and production gating for dev Gmail routes. |
 | 1.15 | 2026-05-26 | Added phase statuses, populated current alpha state from the controlled Phase 0a snapshot, added Phase 0a/0b exit memo follow-through, clarified the remaining real-traffic cost baseline question, and added document-maintenance guidance. |
 | 1.14 | 2026-05-26 | Tightened `docs/ONBOARDING_SPEC.md` to v1.1 with card status rules, recommendation versioning, conversation summary generation, mutation response contracts, refinement gate validation, telemetry debounce, abandonment semantics, and accessibility/initial-state notes. |
 | 1.13 | 2026-05-26 | Added `docs/ONBOARDING_SPEC.md` as the Phase 0c onboarding/product spine implementation contract. |

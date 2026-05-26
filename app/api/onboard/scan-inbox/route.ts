@@ -10,6 +10,7 @@ import {
 } from "@/lib/ai/external-api-telemetry"
 import { generateOpenAIObject } from "@/lib/ai/gateway"
 import { inboxSenderRelevanceSchema } from "@/lib/ai/schemas/onboarding"
+import { buildOnboardingSnapshot, recordScanArtifact } from "@/lib/onboard/state"
 
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY
 const SCAN_WINDOW_DAYS = 14
@@ -30,6 +31,8 @@ export async function POST() {
   }
 
   try {
+    await recordScanArtifact(user.id, "running", { scan_window_days: SCAN_WINDOW_DAYS })
+
     // 1. Get Google OAuth connection
     const { data: acct, error: acctErr } = await supabaseServiceRole
       .from("connected_accounts")
@@ -40,6 +43,10 @@ export async function POST() {
       .single()
 
     if (acctErr || !acct) {
+      await recordScanArtifact(user.id, "failed", {}, {
+        code: "google_account_missing",
+        message: acctErr?.message || "Please connect your Google account first",
+      })
       return NextResponse.json({
         ok: false, error: "No connected Google account",
         details: acctErr?.message || "Please connect your Google account first"
@@ -230,11 +237,14 @@ export async function POST() {
     }
 
     if (allMessages.length === 0) {
+      const scanSummary = { total_senders: 0, relevant_senders: [], content_types_found: [], gaps: [] }
+      await recordScanArtifact(user.id, "empty", scanSummary)
       return NextResponse.json({
         ok: true, senders_found: 0, relevant_senders: 0,
         scan_window_days: SCAN_WINDOW_DAYS,
-        scan_summary: { total_senders: 0, relevant_senders: [], content_types_found: [], gaps: [] },
-        message: "No emails found in primary inbox."
+        scan_summary: scanSummary,
+        message: "No emails found in primary inbox.",
+        snapshot: await buildOnboardingSnapshot(user.id),
       })
     }
 
@@ -335,11 +345,14 @@ export async function POST() {
     }
 
     if (senderMap.size === 0) {
+      const scanSummary = { total_senders: 0, relevant_senders: [], content_types_found: [], gaps: [] }
+      await recordScanArtifact(user.id, "empty", scanSummary)
       return NextResponse.json({
         ok: true, senders_found: 0, relevant_senders: 0,
         scan_window_days: SCAN_WINDOW_DAYS,
-        scan_summary: { total_senders: 0, relevant_senders: [], content_types_found: [], gaps: [] },
-        message: "Could not extract sender info."
+        scan_summary: scanSummary,
+        message: "Could not extract sender info.",
+        snapshot: await buildOnboardingSnapshot(user.id),
       })
     }
 
@@ -503,15 +516,26 @@ Return ONLY valid JSON:
       gaps,
     }
 
+    await recordScanArtifact(
+      user.id,
+      relevantSenders.length > 0 ? "complete" : "empty",
+      scanSummary
+    )
+
     return NextResponse.json({
       ok: true,
       senders_found: senderMap.size,
       relevant_senders: relevantSenders.length,
       scan_window_days: SCAN_WINDOW_DAYS,
       scan_summary: scanSummary,
+      snapshot: await buildOnboardingSnapshot(user.id),
     })
   } catch (e: any) {
     console.error("Error scanning inbox:", e)
+    await recordScanArtifact(user.id, "failed", {}, {
+      code: "scan_failed",
+      message: String(e?.message || e),
+    })
     return NextResponse.json({ ok: false, error: String(e.message || e) }, { status: 500 })
   }
 }

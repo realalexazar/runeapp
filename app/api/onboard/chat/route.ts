@@ -8,6 +8,12 @@ import {
   onboardRecommendationTurnSchema,
   onboardTechnicalConfigSchema,
 } from "@/lib/ai/schemas/onboarding"
+import {
+  appendOnboardingMessage,
+  buildOnboardingSnapshot,
+  recordOnboardingEvent,
+  updateIntentState,
+} from "@/lib/onboard/state"
 
 function normalizeInterests(interests: string[]): string[] {
   const result: string[] = []
@@ -281,11 +287,16 @@ export async function POST(req: Request) {
         }
       })
 
+      await appendOnboardingMessage(userId, "rune", response.rune_message, {
+        message_type: "opening",
+      })
+
       return NextResponse.json({
         ok: true,
         rune_message: response.rune_message,
         signal: null,
         onboard_chat_phase: onboardChatPhase,
+        snapshot: await buildOnboardingSnapshot(userId),
       })
     }
 
@@ -296,6 +307,8 @@ export async function POST(req: Request) {
     if (!userMessage) {
       return NextResponse.json({ ok: false, error: "message is required" }, { status: 400 })
     }
+
+    await appendOnboardingMessage(userId, "user", userMessage)
 
     const messages: Array<{ role: "user" | "assistant"; content: string }> = [
       ...conversationHistory.slice(-30),
@@ -346,6 +359,10 @@ export async function POST(req: Request) {
       signalData = turn.intent
     }
 
+    await appendOnboardingMessage(userId, "rune", userFacingMessage, {
+      signal: signalType,
+    })
+
     if (signalType === "intent") {
       const rawInterestsFromIntent = [
         ...(signalData?.occupation_interests || []),
@@ -368,16 +385,23 @@ export async function POST(req: Request) {
           updated_at: new Date().toISOString()
         }, { onConflict: "user_id" })
 
+      await updateIntentState(userId, signalData)
+
       return NextResponse.json({
         ok: true,
         rune_message: userFacingMessage,
         signal: "intent_ready",
         intent_data: signalData,
         onboard_chat_phase: "recommendation" as const,
+        snapshot: await buildOnboardingSnapshot(userId),
       })
     }
 
     if (signalType === "recommendation" && signalData) {
+      await recordOnboardingEvent(userId, "recommendation_generation_started", {
+        has_scan_artifact: Boolean(body.scan_results),
+      })
+
       const { data: profile } = await supabaseServiceRole
         .from("user_profiles")
         .select("recommended_config, stay_on_top_of")
@@ -422,6 +446,7 @@ export async function POST(req: Request) {
         signal: "recommendation_ready",
         recommendation_data: mergedData,
         onboard_chat_phase: "recommendation" as const,
+        snapshot: await buildOnboardingSnapshot(userId),
       })
     }
 
@@ -430,6 +455,7 @@ export async function POST(req: Request) {
       rune_message: userFacingMessage,
       signal: null,
       onboard_chat_phase: serverPhase,
+      snapshot: await buildOnboardingSnapshot(userId),
     })
 
   } catch (e: any) {

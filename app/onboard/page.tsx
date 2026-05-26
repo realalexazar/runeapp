@@ -35,8 +35,71 @@ type RecommendationData = {
   user_facing_summary?: string[]
 }
 
+type OnboardingSnapshot = {
+  state: string
+  state_storage_available?: boolean
+  conversation?: {
+    messages?: Array<{ id?: string; role: "user" | "rune"; content: string; created_at: string }>
+  }
+  recommendation?: {
+    config_version: number
+    cards: Array<Record<string, any>>
+    user_facing_summary: string[]
+    raw_recommendation?: any
+  }
+}
+
 function uid() {
   return Math.random().toString(36).slice(2) + Date.now().toString(36)
+}
+
+function recommendationFromSnapshot(snapshot: OnboardingSnapshot): RecommendationData | null {
+  const raw = snapshot.recommendation?.raw_recommendation
+  if (raw?.slot_allocation) return raw as RecommendationData
+
+  const cards = snapshot.recommendation?.cards || []
+  if (cards.length === 0) return null
+
+  const slotAllocation: SlotAllocation[] = []
+  for (const card of cards) {
+    if (card.type === "news") {
+      slotAllocation.push({
+        slot: slotAllocation.length + 1,
+        type: "news",
+        focus: String(card.focus || ""),
+        rationale: String(card.rationale || ""),
+        retrieval_queries: Array.isArray(card.retrieval_queries) ? card.retrieval_queries : [],
+        required_terms: Array.isArray(card.required_terms) ? card.required_terms : [],
+        scope_summary: String(card.scope_summary || ""),
+      })
+    }
+    if (card.type === "lesson") {
+      slotAllocation.push({
+        slot: slotAllocation.length + 1,
+        type: "lesson",
+        focus: String(card.topic || ""),
+        rationale: String(card.rationale || ""),
+        starting_level: String(card.starting_level || "beginner"),
+        curriculum_goal: String(card.curriculum_goal || ""),
+        scope_summary: String(card.scope_summary || ""),
+      })
+    }
+    if (card.type === "inbox") {
+      const selectedSenders = Array.isArray(card.selected_senders) ? card.selected_senders : []
+      slotAllocation.push({
+        slot: slotAllocation.length + 1,
+        type: "email",
+        focus: "Inbox updates",
+        rationale: String(card.rationale || ""),
+        priority_senders: selectedSenders.map((sender: any) => String(sender.address || sender)).filter(Boolean),
+      })
+    }
+  }
+
+  return {
+    slot_allocation: slotAllocation,
+    user_facing_summary: snapshot.recommendation?.user_facing_summary || [],
+  }
 }
 
 function TypingIndicator() {
@@ -282,6 +345,7 @@ function OnboardFlow() {
 
   const [phase, setPhase] = useState<"conversation" | "gmail_connect" | "scanning" | "recommendation" | "approved">("conversation")
   const [recommendationData, setRecommendationData] = useState<RecommendationData | null>(null)
+  const [, setServerSnapshot] = useState<OnboardingSnapshot | null>(null)
   const [approving, setApproving] = useState(false)
   const [showGreetingPrompt, setShowGreetingPrompt] = useState(false)
   const [conversationStarted, setConversationStarted] = useState(false)
@@ -307,31 +371,90 @@ function OnboardFlow() {
     scrollToBottom()
   }, [scrollToBottom])
 
+  const applyServerSnapshot = useCallback((snapshot: OnboardingSnapshot) => {
+    setServerSnapshot(snapshot)
+
+    const snapshotMessages = snapshot.conversation?.messages || []
+    if (snapshotMessages.length > 0) {
+      const restored = snapshotMessages.map((message) => ({
+        id: message.id || uid(),
+        role: message.role,
+        content: message.content,
+        timestamp: Date.parse(message.created_at) || Date.now(),
+      }))
+      setMessages(restored)
+      conversationHistory.current = restored.map((message) => ({
+        role: message.role === "rune" ? "assistant" : "user",
+        content: message.content,
+      }))
+      setConversationStarted(true)
+      setShowGreetingPrompt(false)
+      setShowSurge(false)
+    }
+
+    const restoredRecommendation = recommendationFromSnapshot(snapshot)
+    if (restoredRecommendation) setRecommendationData(restoredRecommendation)
+
+    if (snapshot.state === "complete" || snapshot.state === "approved") {
+      setPhase("approved")
+    } else if (snapshot.state === "recommendation_ready") {
+      setPhase("recommendation")
+    } else if (snapshot.state === "gmail_needed") {
+      setPhase("gmail_connect")
+    } else if (snapshot.state === "scanning") {
+      setPhase("scanning")
+    } else if (snapshot.state === "recommendation_generating" && restoredRecommendation) {
+      setPhase("recommendation")
+    }
+  }, [])
+
+  const hydrateServerState = useCallback(async () => {
+    try {
+      const res = await fetch("/api/onboard/state", { cache: "no-store" })
+      if (res.status === 401) {
+        router.push("/auth?redirectedFrom=/onboard")
+        return null
+      }
+      const data = await res.json()
+      if (data.ok && data.snapshot) {
+        applyServerSnapshot(data.snapshot)
+        return data.snapshot as OnboardingSnapshot
+      }
+    } catch {}
+    return null
+  }, [applyServerSnapshot, router])
+
   useEffect(() => {
     if (initDone.current) return
     initDone.current = true
 
     const stepParam = searchParams.get("step")
     if (stepParam === "scanning") {
-      try {
-        const saved = sessionStorage.getItem("rune_onboard_messages")
-        if (saved) {
-          const restored = JSON.parse(saved) as ChatMessage[]
-          setMessages(restored)
-          for (const m of restored) {
-            conversationHistory.current.push({
-              role: m.role === "rune" ? "assistant" : "user",
-              content: m.content
-            })
-          }
+      hydrateServerState().then((snapshot) => {
+        if (!snapshot?.conversation?.messages?.length) {
+          try {
+            const saved = sessionStorage.getItem("rune_onboard_messages")
+            if (saved) {
+              const restored = JSON.parse(saved) as ChatMessage[]
+              setMessages(restored)
+              for (const m of restored) {
+                conversationHistory.current.push({
+                  role: m.role === "rune" ? "assistant" : "user",
+                  content: m.content
+                })
+              }
+            }
+          } catch {}
         }
-      } catch {}
-      setConversationStarted(true)
-      setShowSurge(false)
-      setPhase("scanning")
-      runInboxScan()
+        setConversationStarted(true)
+        setShowSurge(false)
+        setPhase("scanning")
+        runInboxScan()
+      })
       return
     }
+
+    hydrateServerState()
 
     const surgeTimer = window.setTimeout(() => setShowSurge(false), 1200)
     const promptTimer = window.setTimeout(() => setShowGreetingPrompt(true), 600)
@@ -357,6 +480,7 @@ function OnboardFlow() {
       const data = await res.json()
       setTyping(false)
       if (data.ok && data.rune_message) {
+        if (data.snapshot) setServerSnapshot(data.snapshot)
         addRuneMessage(data.rune_message)
         setTimeout(() => {
           scrollRef.current?.scrollTo({ top: 0, behavior: "auto" })
@@ -408,12 +532,15 @@ function OnboardFlow() {
       }
 
       addRuneMessage(data.rune_message)
+      if (data.snapshot) setServerSnapshot(data.snapshot)
 
       if (data.signal === "intent_ready") {
         const intent = data.intent_data || {}
         if (intent.inbox_preferences?.wants_inbox_curation === false) {
+          await persistInboxPreference("not_wanted")
           setTimeout(() => injectScanResults(null), 500)
         } else {
+          await persistInboxPreference("wanted")
           try {
             sessionStorage.setItem("rune_onboard_messages", JSON.stringify([
               ...messages,
@@ -438,6 +565,24 @@ function OnboardFlow() {
     }
   }
 
+  async function handleBuildRune() {
+    if (loading) return
+    setLoading(true)
+    try {
+      const res = await fetch("/api/onboard/build", { method: "POST" })
+      if (res.status === 401) { router.push("/auth?redirectedFrom=/onboard"); return }
+      const data = await res.json()
+      if (data.snapshot) applyServerSnapshot(data.snapshot)
+      if (!data.ok && data.error?.message) {
+        addRuneMessage(data.error.message)
+      }
+    } catch {
+      addRuneMessage("Connection issue - try again in a moment.")
+    } finally {
+      setLoading(false)
+    }
+  }
+
   async function runInboxScan() {
     setTyping(true)
     addRuneMessage("Gmail connected. Reading your inbox now...")
@@ -453,6 +598,7 @@ function OnboardFlow() {
       setTyping(false)
 
       if (scanData.ok) {
+        if (scanData.snapshot) applyServerSnapshot(scanData.snapshot)
         addRuneMessage(`Found ${scanData.relevant_senders || 0} relevant senders in your inbox.`)
         await injectScanResults(scanData.scan_summary)
       } else {
@@ -489,6 +635,7 @@ function OnboardFlow() {
       setTyping(false)
 
       if (data.ok) {
+        if (data.snapshot) setServerSnapshot(data.snapshot)
         addRuneMessage(data.rune_message)
 
         if (data.signal === "recommendation_ready") {
@@ -512,14 +659,28 @@ function OnboardFlow() {
     scrollToBottom()
 
     try {
-      await fetch("/api/onboard/recommend", {
+      const res = await fetch("/api/onboard/recommend", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ recommendation: recData })
       })
+      const data = await res.json().catch(() => null)
+      if (data?.snapshot) applyServerSnapshot(data.snapshot)
     } catch {
       console.error("Failed to store recommendation")
     }
+  }
+
+  async function persistInboxPreference(status: "wanted" | "not_wanted" | "skipped") {
+    try {
+      const res = await fetch("/api/onboard/inbox-preference", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ preference_status: status })
+      })
+      const data = await res.json().catch(() => null)
+      if (data?.snapshot) setServerSnapshot(data.snapshot)
+    } catch {}
   }
 
   async function handleApprove() {
@@ -544,6 +705,7 @@ function OnboardFlow() {
       const data = await res.json()
 
       if (data.ok) {
+        if (data.snapshot) applyServerSnapshot(data.snapshot)
         setPhase("approved")
         try { sessionStorage.removeItem("rune_onboard_messages"); sessionStorage.removeItem("rune_onboard_intent") } catch {}
       } else {
@@ -558,6 +720,7 @@ function OnboardFlow() {
 
   const showInput = phase === "conversation" || (phase === "recommendation" && !approving && recommendationData !== null)
   const showGreeting = phase === "conversation" && !conversationStarted && messages.length === 0
+  const showBuildButton = phase === "conversation" && messages.some((message) => message.role === "user") && !loading
 
   function handleTextareaInput(e: React.ChangeEvent<HTMLTextAreaElement>) {
     setInput(e.target.value)
@@ -615,6 +778,15 @@ function OnboardFlow() {
           {showInput && (
             <div className="shrink-0 px-2 pb-[max(0.5rem,env(safe-area-inset-bottom))] pt-2 sm:px-5" style={{ background: "#07070d" }}>
               <div className="mx-auto w-[calc(100%-8px)] max-w-[420px] sm:w-full sm:max-w-[460px]">
+                {showBuildButton && (
+                  <button
+                    type="button"
+                    onClick={handleBuildRune}
+                    className="mb-2 w-full rounded-xl border border-white/[0.08] bg-white/[0.04] px-4 py-2.5 text-[13px] font-medium text-white/70 transition hover:bg-white/[0.07] hover:text-white"
+                  >
+                    Build my Rune
+                  </button>
+                )}
                 <div
                   className="flex items-center gap-2 rounded-2xl bg-[#12121a] ring-1 ring-white/[0.08] px-3 py-2.5 sm:px-4 sm:py-3 focus-within:ring-white/[0.15] transition-all"
                   onClick={beginConversation}

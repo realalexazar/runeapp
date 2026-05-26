@@ -5,8 +5,12 @@ import { google, gmail_v1 } from "googleapis"
 import { decrypt } from "@/lib/crypto"
 import pLimit from "p-limit"
 import { extractSenderKey } from "@/lib/onboard/sender-extraction"
+import { requireDevOrAdminRequest } from "@/lib/dev-route"
 
-export async function POST() {
+export async function POST(req: Request) {
+  const devGuard = requireDevOrAdminRequest(req)
+  if (devGuard) return devGuard
+
   const startTime = Date.now()
   const supabase = await getSupabaseServerClient()
   const { data: { user } } = await supabase.auth.getUser()

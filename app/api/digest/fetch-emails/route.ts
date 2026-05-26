@@ -5,6 +5,7 @@ import { google, gmail_v1 } from "googleapis"
 import { decrypt } from "@/lib/crypto"
 import pLimit from "p-limit"
 import { extractSenderKey } from "@/lib/onboard/sender-extraction"
+import { requireDevOrAdminRequest } from "@/lib/dev-route"
 
 /**
  * POST /api/digest/fetch-emails
@@ -15,6 +16,9 @@ import { extractSenderKey } from "@/lib/onboard/sender-extraction"
  * Body: { lookback_days?: number } - Override lookback window (defaults to config-based)
  */
 export async function POST(req: Request) {
+  const devGuard = requireDevOrAdminRequest(req)
+  if (devGuard) return devGuard
+
   const startTime = Date.now()
   const supabase = await getSupabaseServerClient()
   const { data: { user }, error: userError } = await supabase.auth.getUser()

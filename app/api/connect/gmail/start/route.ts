@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { getSupabaseServerClient } from "@/lib/supabase/server";
 import { google } from "googleapis";
+import { recordOnboardingEvent } from "@/lib/onboard/state";
 
 export async function GET(request: Request) {
   try {
@@ -57,6 +58,10 @@ export async function GET(request: Request) {
       ],
       include_granted_scopes: true,
       state: redirect,
+    });
+
+    await recordOnboardingEvent(user.id, "gmail_connect_started", {
+      redirect_target: redirect,
     });
 
     return NextResponse.redirect(url);

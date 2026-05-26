@@ -2,6 +2,7 @@ import { NextResponse } from "next/server"
 import { getSupabaseServerClient } from "@/lib/supabase/server"
 import { supabaseServiceRole } from "@/lib/supabase/service"
 import { generateCurriculumPlan } from "@/lib/onboard/generate-curriculum"
+import { buildOnboardingSnapshot, markOnboardingApproved, markOnboardingComplete } from "@/lib/onboard/state"
 
 const ALLOWED_LEVELS = ["beginner", "intermediate", "advanced"] as const
 
@@ -138,6 +139,8 @@ export async function POST(req: Request) {
       createdIds.newsletter_selections_count = combined.length
     }
 
+    await markOnboardingApproved(user.id)
+
     const { data: rpcData, error: rpcError } = await supabaseServiceRole.rpc("commit_onboard_approval", {
       p_user_id: user.id,
       p_now: now,
@@ -156,6 +159,8 @@ export async function POST(req: Request) {
         { status: 500 }
       )
     }
+
+    await markOnboardingComplete(user.id)
 
     const result = rpcData as {
       ok?: boolean
@@ -178,7 +183,11 @@ export async function POST(req: Request) {
       createdIds.newsletter_selections_count = result.newsletter_selection_count
     }
 
-    return NextResponse.json({ ok: true, created_ids: createdIds })
+    return NextResponse.json({
+      ok: true,
+      created_ids: createdIds,
+      snapshot: await buildOnboardingSnapshot(user.id),
+    })
   } catch (e: any) {
     console.error("Error approving onboarding config:", e)
     return NextResponse.json({ ok: false, error: String(e.message || e) }, { status: 500 })

@@ -20,11 +20,11 @@ export default function AuthDialog({ open, onOpenChange, initialMode = "signup" 
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [confirmationSent, setConfirmationSent] = useState(false)
-  const supabase = getSupabaseBrowserClient()
 
   async function handleEmailAuth() {
     setLoading(true)
     setError(null)
+    const supabase = getSupabaseBrowserClient()
     try {
       if (mode === "signup") {
         const { data, error } = await supabase.auth.signUp({ email, password })
@@ -50,6 +50,7 @@ export default function AuthDialog({ open, onOpenChange, initialMode = "signup" 
   async function handleGoogle() {
     setLoading(true)
     setError(null)
+    const supabase = getSupabaseBrowserClient()
     try {
       await supabase.auth.signInWithOAuth({
         provider: "google",

@@ -36,7 +36,13 @@ export default function SmartHeader() {
 
   // Check auth state
   useEffect(() => {
-    const supabase = getSupabaseBrowserClient()
+    let supabase: ReturnType<typeof getSupabaseBrowserClient>
+    try {
+      supabase = getSupabaseBrowserClient()
+    } catch {
+      setUser(null)
+      return
+    }
     
     // Get initial session
     supabase.auth.getUser().then(({ data: { user } }) => {
