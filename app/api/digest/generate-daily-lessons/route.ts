@@ -1,8 +1,12 @@
 import { NextResponse } from "next/server"
 import { getSupabaseServerClient } from "@/lib/supabase/server"
+import { requireDevOrAdminRequest } from "@/lib/dev-route"
 import { generateDailyLessons } from "@/lib/digest/generator"
 
 export async function POST(req: Request) {
+  const gated = requireDevOrAdminRequest(req)
+  if (gated) return gated
+
   const supabase = await getSupabaseServerClient()
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) {
@@ -33,4 +37,3 @@ export async function POST(req: Request) {
     }, { status: 500 })
   }
 }
-

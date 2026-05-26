@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server"
 import { getSupabaseServerClient } from "@/lib/supabase/server"
+import { requireDevOrAdminRequest } from "@/lib/dev-route"
 import { getUserModuleConfig } from "@/lib/digest/content-modules"
 import { generateDailyLessons, generateDailyNewsTopics } from "@/lib/digest/generator"
 import { supabaseServiceRole } from "@/lib/supabase/service"
@@ -12,6 +13,9 @@ import {
 import { sendDigestEmail } from "@/lib/digest/email"
 
 export async function POST(req: Request) {
+  const gated = requireDevOrAdminRequest(req)
+  if (gated) return gated
+
   const supabase = await getSupabaseServerClient()
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) {
@@ -115,4 +119,3 @@ export async function POST(req: Request) {
     }, { status: 500 })
   }
 }
-

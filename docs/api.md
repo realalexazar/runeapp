@@ -26,7 +26,7 @@ This document describes the current implemented HTTP surface. User routes requir
 | `/api/onboard/cards/[cardId]` | PATCH | Applies a direct card edit with stale-version checks. |
 | `/api/onboard/approve` | POST | Commits one validated onboarding config into digest config, topics, lessons, and newsletter selections. |
 | `/api/onboard/rerun-setup` | POST | Resets onboarding/config state so the user can re-run setup. |
-| `/api/onboard/backfill-curricula` | POST | Admin-style repair helper for lesson topics missing curriculum plans. |
+| `/api/onboard/backfill-curricula` | GET | Dev/admin repair helper for lesson topics missing curriculum plans. Requires `CRON_SECRET` bearer in production. |
 
 ## Digest
 
@@ -35,10 +35,10 @@ This document describes the current implemented HTTP surface. User routes requir
 | `/api/digest/config` | GET | Returns the current user's digest configuration. |
 | `/api/digest/config` | POST | Saves digest configuration and maps topics into durable topic records. |
 | `/api/digest/verify` | GET | Verifies digest readiness: config, Gmail status, selected senders, and content prerequisites. |
-| `/api/digest/generate` | POST | Runs end-to-end digest generation and optional send for the current user/manual trigger. |
-| `/api/digest/generate-summaries` | POST | Dev/manual summary generation route backed by shared newsletter summarization code. |
-| `/api/digest/generate-daily-news-topics` | POST | Dev/manual route for daily news topic generation. |
-| `/api/digest/generate-daily-lessons` | POST | Dev/manual route for daily lesson generation. |
+| `/api/digest/generate` | POST | Dev/admin manual end-to-end digest generation and optional send. Requires `CRON_SECRET` bearer in production. |
+| `/api/digest/generate-summaries` | POST | Dev/admin manual summary generation route. Requires `CRON_SECRET` bearer in production. |
+| `/api/digest/generate-daily-news-topics` | POST | Dev/admin manual route for daily news topic generation. Requires `CRON_SECRET` bearer in production. |
+| `/api/digest/generate-daily-lessons` | POST | Dev/admin manual route for daily lesson generation. Requires `CRON_SECRET` bearer in production. |
 | `/api/digest/format` | POST | Formats generated modules into a persisted HTML/text digest. |
 | `/api/digest/send` | POST | Sends a formatted digest through Resend. |
 | `/api/digest/lesson-state` | GET | Reads lesson progress state for a topic. |
@@ -49,7 +49,7 @@ This document describes the current implemented HTTP surface. User routes requir
 | Route | Method | Auth | Purpose |
 | --- | --- | --- | --- |
 | `/api/cron/generate-digests` | GET | `CRON_SECRET` bearer | Scheduled digest generation and delivery. |
-| `/api/export/features` | GET | Supabase session | Debug CSV export for inbox analysis and digest data. |
+| `/api/export/features` | GET | Supabase session plus `CRON_SECRET` bearer in production | Debug CSV export for inbox analysis and digest data. |
 | `/health` | GET | Public | Lightweight health check returning `{ "status": "ok" }`. |
 
 ## Removed Phase 0c Dev Routes

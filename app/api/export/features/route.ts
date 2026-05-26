@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server"
 import { getSupabaseServerClient } from "@/lib/supabase/server"
 import { supabaseServiceRole } from "@/lib/supabase/service"
+import { requireDevOrAdminRequest } from "@/lib/dev-route"
 
 function toCsv(rows: Record<string, unknown>[]): string {
   if (rows.length === 0) return ""
@@ -18,6 +19,9 @@ function toCsv(rows: Record<string, unknown>[]): string {
 }
 
 export async function GET(req: Request) {
+  const gated = requireDevOrAdminRequest(req)
+  if (gated) return gated
+
   const { searchParams } = new URL(req.url)
   const format = (searchParams.get("format") || "csv").toLowerCase()
   const limitParam = Number(searchParams.get("limit") || "2000")
@@ -84,5 +88,4 @@ export async function GET(req: Request) {
     }
   })
 }
-
 

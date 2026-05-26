@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server"
+import { requireDevOrAdminRequest } from "@/lib/dev-route"
 import { supabaseServiceRole } from "@/lib/supabase/service"
 import { isWithinSendWindow } from "@/lib/digest/utils"
 import { getUserModuleConfig } from "@/lib/digest/content-modules"
@@ -8,15 +9,9 @@ import { sendDigestEmail } from "@/lib/digest/email"
 import { fetchNewslettersForUser } from "@/lib/digest/fetch-newsletters"
 import { summarizeNewslettersForUser } from "@/lib/digest/summarize-newsletters"
 
-const CRON_SECRET = process.env.CRON_SECRET
-
 export async function GET(req: Request) {
-  if (CRON_SECRET) {
-    const authHeader = req.headers.get("authorization")
-    if (authHeader !== `Bearer ${CRON_SECRET}`) {
-      return NextResponse.json({ ok: false, error: "Unauthorized" }, { status: 401 })
-    }
-  }
+  const gated = requireDevOrAdminRequest(req)
+  if (gated) return gated
 
   try {
     const url = new URL(req.url)
@@ -142,4 +137,3 @@ export async function GET(req: Request) {
     }, { status: 500 })
   }
 }
-

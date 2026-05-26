@@ -1,16 +1,11 @@
 import { NextResponse } from "next/server"
 import { supabaseServiceRole } from "@/lib/supabase/service"
 import { generateCurriculumPlan } from "@/lib/onboard/generate-curriculum"
-
-const CRON_SECRET = process.env.CRON_SECRET
+import { requireDevOrAdminRequest } from "@/lib/dev-route"
 
 export async function GET(req: Request) {
-  if (CRON_SECRET) {
-    const authHeader = req.headers.get("authorization")
-    if (authHeader !== `Bearer ${CRON_SECRET}`) {
-      return NextResponse.json({ ok: false, error: "Unauthorized" }, { status: 401 })
-    }
-  }
+  const gated = requireDevOrAdminRequest(req)
+  if (gated) return gated
 
   try {
     const { data: topics, error } = await supabaseServiceRole

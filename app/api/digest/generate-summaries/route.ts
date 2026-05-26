@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server"
 import { getSupabaseServerClient } from "@/lib/supabase/server"
 import { supabaseServiceRole } from "@/lib/supabase/service"
+import { requireDevOrAdminRequest } from "@/lib/dev-route"
 import pLimit from "p-limit"
 import { convert } from "html-to-text"
 import { isTransientNetworkError } from "@/lib/openai/chat"
@@ -39,6 +40,9 @@ const MIN_CONTENT_LENGTH = 100 // Minimum content length before skipping LLM (sp
  * - model: 'gpt-4o-mini' or 'gpt-4o'
  */
 export async function POST(req: Request) {
+  const gated = requireDevOrAdminRequest(req)
+  if (gated) return gated
+
   const startTime = Date.now()
   const supabase = await getSupabaseServerClient()
 

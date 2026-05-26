@@ -12,8 +12,8 @@
 - Deployed on Vercel at `runeapp.co` (custom domain)
 - Resend verified domain for email delivery
 - `OVERRIDE_RECIPIENT` set — all digests route to founder inbox for review
-- `force=true` param on cron endpoint for on-demand digest generation
-- Backfill endpoint at `/api/onboard/backfill-curricula` for missing curriculum plans
+- `force=true` param on cron endpoint for on-demand digest generation, protected by `CRON_SECRET`
+- Backfill endpoint at `/api/onboard/backfill-curricula` for missing curriculum plans, protected by `CRON_SECRET`
 
 ### What's Working
 - Onboarding chat (Claude) → intent extraction → recommendation → approval
@@ -77,7 +77,7 @@ Scan every API route for the same pattern: operations that `console.error` and c
 - Auth dialog keyboard behavior on various mobile browsers
 
 ### Priority 6: Production Hardening
-- Remove `force=true` before public launch (or add admin auth)
+- Revisit whether `force=true` should survive public launch even behind `CRON_SECRET`
 - Set up Vercel Cron for automated daily digest delivery
 - Add rate limiting on public API routes
 - Review Supabase RLS policies for all tables

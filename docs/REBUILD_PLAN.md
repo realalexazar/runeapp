@@ -1,7 +1,7 @@
 # Rune Rebuild Plan
 
 Last updated: 2026-05-26
-Version: 1.20
+Version: 1.21
 File: `docs/REBUILD_PLAN.md`
 
 This document is the source of truth for the Rune rebuild. It pins down the sequence, scope, exit criteria, and architectural direction so the team does not keep re-litigating the plan in chat.
@@ -89,7 +89,7 @@ These are intentionally out of scope until the relevant phase says otherwise.
 | --- | --- | --- | --- | --- | --- |
 | 0a | Instrumentation complete; full real-traffic baseline pending or waiver needed | Grok ships, GPT reviews completeness | Measure existing system | Static LLM/external API inventory plus runtime telemetry | Every LLM/search call site is mapped and telemetry records real runs |
 | 0b | Implementation complete; exit pending telemetry review, waiver decisions, and human sign-off | Grok ships, GPT reviews contracts | Enforce structured LLM contracts | LLM gateway with cost logging and Zod validation | Call sites migrate one by one with schema fixtures and no cost regression |
-| 0c | In progress; server-owned onboarding state hardened, authenticated E2E still pending | Grok ships, GPT reviews architecture | Stabilize product spine | Server-side onboarding state and one digest pipeline | Onboarding and digest flows are durable, gated, and testable |
+| 0c | In progress; server-owned onboarding state and manual route gates hardened, authenticated E2E still pending | Grok ships, GPT reviews architecture | Stabilize product spine | Server-side onboarding state and one digest pipeline | Onboarding and digest flows are durable, gated, and testable |
 | 1 | Not started | GPT leads interface design, Grok implements | Define graph domain APIs | Graph-facing application interfaces backed by Postgres | Product code depends on graph APIs, not graph database details |
 | 2 | Not started | Shared | Rebuild intelligence layer | Search providers, query decomposition, cache, signal classifier | Retrieval and ranking are modular, measured, and fallback-capable |
 | 3 | Not started | Shared, benchmark-driven | Commit graph infra and continuity | AGE/Neo4j/relational benchmark, memory, credibility | Real access patterns determine graph storage choice |
@@ -579,6 +579,7 @@ The plan is changing quickly because the rebuild is active. Going forward, group
 
 | Version | Date | Changes |
 | --- | --- | --- |
+| 1.21 | 2026-05-26 | Gated remaining expensive/manual production routes with `CRON_SECRET`: digest manual generation, module generation, summary generation, curriculum backfill, export debug, and cron no-secret fallback. |
 | 1.20 | 2026-05-26 | Hardened Phase 0c onboarding state ownership: removed client `sessionStorage` recovery, moved chat prompt history to persisted server messages, added onboarding gate/card unit tests, and made approval failures emit `approval_failed` with updated snapshots. |
 | 1.19 | 2026-05-26 | Removed remaining dashboard-era dev routes and docs: deleted `DevModePanel`, `/api/digest/fetch-emails`, `/api/backfill/start`, `/api/backfill/progress`, `/api/parse/progress`, and refreshed the active README/API references. |
 | 1.18 | 2026-05-26 | Cleaned dashboard-era onboarding drift: dashboard now redirects incomplete users to `/onboard`; deleted old onboarding card components, legacy clarifier/classification/finalize routes, old topic preview route, and the deprecated sender batch classifier. |
